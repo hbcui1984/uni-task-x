@@ -19,8 +19,8 @@
 
 		<unicloud-db ref="udb" v-slot:default="{data, loading, error}" collection="opendb-projects"
 			where="(managers==$cloudEnv_uid || members==$cloudEnv_uid) && archived == true"
-			field="_id,name,cover,description,archived_date,managers" :getone="false">
-			<view v-if="error" class="error-message">{{error.message}}</view>
+			field="_id,name,cover,description,archived_date,managers">
+			<view v-if="error" class="error-message"><text>{{error.message}}</text></view>
 			<view v-else-if="loading" class="loading-state">
 				<uni-load-more status="loading"></uni-load-more>
 			</view>
@@ -30,7 +30,7 @@
 						@click="handleItemClick(item._id, item.name)">
 						<template v-slot:body>
 							<view class="project-item">
-								<view class="project-name">{{item.name}}</view>
+								<text class="project-name">{{item.name}}</text>
 								<view class="project-meta">
 									<text class="archived-date" v-if="item.archived_date">
 										归档于 {{formatDate(item.archived_date)}}
@@ -50,34 +50,20 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		data() {
-			return {}
-		},
-		onLoad() {
-			uni.setNavigationBarTitle({
-				title: '已归档项目'
-			})
-		},
-		onReady() {
-			this.$refs.udb.loadData()
-		},
-		methods: {
-			handleItemClick(id, name) {
-				uni.navigateTo({
-					url: '/pages/opendb-task/list?id=' + id + "&name=" + name
-				})
-			},
-			formatDate(timestamp) {
-				if (!timestamp) return ''
-				const date = new Date(timestamp)
-				const year = date.getFullYear()
-				const month = String(date.getMonth() + 1).padStart(2, '0')
-				const day = String(date.getDate()).padStart(2, '0')
-				return `${year}-${month}-${day}`
-			}
-		}
+<script setup>
+	function handleItemClick(id, name) {
+		uni.navigateTo({
+			url: `/pages/opendb-task/list?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`
+		})
+	}
+
+	function formatDate(timestamp) {
+		if (!timestamp) return ''
+		const date = new Date(timestamp)
+		const year = date.getFullYear()
+		const month = String(date.getMonth() + 1).padStart(2, '0')
+		const day = String(date.getDate()).padStart(2, '0')
+		return `${year}-${month}-${day}`
 	}
 </script>
 

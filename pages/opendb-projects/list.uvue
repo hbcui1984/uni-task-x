@@ -27,7 +27,7 @@
 		<unicloud-db ref="udb" v-slot:default="{data, loading, error}" collection="opendb-projects"
 			where="(managers==$cloudEnv_uid || members==$cloudEnv_uid) && archived != true"
 			field="_id,name,cover,description">
-			<view v-if="error" class="error-message">{{error.message}}</view>
+			<view v-if="error" class="error-message"><text>{{error.message}}</text></view>
 			<view v-else-if="loading" class="loading-state">
 				<uni-load-more status="loading"></uni-load-more>
 			</view>
@@ -56,93 +56,60 @@
 	</view>
 </template>
 
-<script>
-	import {
-		createTopInsetStyle,
-		getLayoutMetrics
-	} from '@/utils/layout.js'
+<script setup>
+	import { createTopInsetStyle, getLayoutMetrics } from '@/utils/layout.js'
 
-	export default {
-		data() {
-			return {
-				safeAreaTop: 0,
-				isMobileLayout: false,
-				useImmersiveHeader: false
-			}
-		},
-		computed: {
-			headerStyle() {
-				return createTopInsetStyle({
-					safeAreaTop: this.safeAreaTop,
-					isMobile: this.isMobileLayout
-				})
-			}
-		},
-		onPullDownRefresh() {
-			this.$refs.udb.loadData({
-				clear: true
-			}, () => {
-				uni.stopPullDownRefresh()
-			})
-		},
-		onLoad() {
-			const metrics = getLayoutMetrics()
-			this.safeAreaTop = metrics.safeAreaTop
-			this.isMobileLayout = metrics.isMobile
-			this.useImmersiveHeader = metrics.isMobile
+	const udb = ref(null)
+	const safeAreaTop = ref(0)
+	const isMobileLayout = ref(false)
+	const useImmersiveHeader = ref(false)
+	const headerStyle = computed(() => createTopInsetStyle({
+		safeAreaTop: safeAreaTop.value,
+		isMobile: isMobileLayout.value
+	}))
 
-			// #ifdef MP
-			this.safeAreaTop = 0
-			this.useImmersiveHeader = false
-			// #endif
+	function updateLayout() {
+		const metrics = getLayoutMetrics()
+		isMobileLayout.value = metrics.isMobile
+		// #ifndef MP
+		safeAreaTop.value = metrics.safeAreaTop
+		useImmersiveHeader.value = metrics.isMobile
+		// #endif
+	}
 
-			uni.$on('refresh-projects', () => {
-				this.$refs.udb && this.$refs.udb.loadData()
-			})
-		},
-		onUnload() {
-			uni.$off('refresh-projects')
-		},
-		methods: {
-			handleItemClick(id, name) {
-				uni.navigateTo({
-					url: '/pages/opendb-task/list?id=' + id + "&name=" + name
-				})
-			},
-			addProject() {
-				// 打开新增页面
-				uni.navigateTo({
-					url: './add',
-					events: {
-						// 监听新增数据成功后, 刷新当前页面数据
-						refreshData: () => {
-							this.$refs.udb.loadData({
-								clear: true
-							})
-						}
-					}
-				})
-			},
-			gotoMyTask() {
-				// 打开我的任务页面
-				uni.navigateTo({
-					url: '../opendb-task/myTask'
-				})
-			},
-			joinProject() {
-				// 预留：小团队场景下默认由管理员直接添加成员，暂不开放邀请码加入入口。
-				uni.showToast({
-					title: '暂未开放邀请码加入',
-					icon: 'none'
-				})
-			},
-			gotoArchivedProjects() {
-				// 打开已归档项目页面
-				uni.navigateTo({
-					url: './list-archived'
-				})
-			}
+	function reloadProjects() {
+		udb.value?.loadData({ clear: true })
+	}
+
+	onLoad(() => {
+		updateLayout()
+		uni.$on('refresh-projects', reloadProjects)
+	})
+	onResize(updateLayout)
+	onUnload(() => uni.$off('refresh-projects', reloadProjects))
+	onPullDownRefresh(() => {
+		if (!udb.value) {
+			uni.stopPullDownRefresh()
+			return
 		}
+		udb.value.loadData({ clear: true, complete: () => uni.stopPullDownRefresh() })
+	})
+
+	function handleItemClick(id, name) {
+		uni.navigateTo({
+			url: `/pages/opendb-task/list?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`
+		})
+	}
+
+	function addProject() {
+		uni.navigateTo({
+			url: '/pages/opendb-projects/add',
+			events: { refreshData: reloadProjects }
+		})
+	}
+
+	function gotoArchivedProjects() {
+		uni.navigateTo({ url: '/pages/opendb-projects/list-archived' })
 	}
 </script>
 
