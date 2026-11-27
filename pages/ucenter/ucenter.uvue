@@ -1,0 +1,173 @@
+<template>
+	<!-- #ifdef APP -->
+	<scroll-view class="center-scroll" direction="vertical">
+	<!-- #endif -->
+		<view class="center">
+			<view class="user-info" @click="openProfile(store.hasLogin)">
+				<image v-if="avatarUrl" class="avatar" :src="avatarUrl" mode="aspectFill" @error="avatarUrl = ''" />
+				<view v-else class="default-avatar"><text class="avatar-icon">{{ icon('person-filled') }}</text></view>
+				<text class="user-name">{{ store.hasLogin ? (userInfo.nickname || userInfo.username || userInfo.mobile || '个人资料') : '未登录' }}</text>
+			</view>
+			<view class="center-list">
+				<view class="menu-row" hover-class="pressed" @click="openProfile(store.hasLogin)">
+					<text class="menu-icon">{{ icon('person') }}</text><text class="menu-title">个人资料</text><text class="chevron">›</text>
+				</view>
+				<view class="menu-row" hover-class="pressed" @click="navigate('/pages/ucenter/settings/settings')">
+					<text class="menu-icon">{{ icon('gear') }}</text><text class="menu-title">账号设置</text><text class="chevron">›</text>
+				</view>
+			</view>
+			<view class="center-list">
+				<!-- #ifdef APP -->
+				<view class="menu-row" hover-class="pressed" @click="checkVersion(true)">
+					<text class="menu-icon">{{ icon('loop') }}</text><text class="menu-title">检查更新</text>
+					<text class="version">{{ versionText }}</text><view v-if="hasUpdate" class="badge"></view><text class="chevron">›</text>
+				</view>
+				<!-- #endif -->
+				<view class="menu-row" hover-class="pressed" @click="navigate('/uni_modules/uni-feedback/pages/opendb-feedback/opendb-feedback')">
+					<text class="menu-icon">{{ icon('help') }}</text><text class="menu-title">意见反馈</text><text class="chevron">›</text>
+				</view>
+			</view>
+			<!-- #ifdef APP -->
+			<view class="center-list">
+				<view v-if="config.h5?.url && store.hasLogin" class="menu-row" hover-class="pressed" @click="shareInvite">
+					<text class="menu-icon">{{ icon('personadd') }}</text><text class="menu-title">邀请好友</text><text class="chevron">›</text>
+				</view>
+				<view class="menu-row" hover-class="pressed" @click="navigate('/pages/ucenter/about/about')">
+					<text class="menu-icon">{{ icon('info') }}</text><text class="menu-title">关于</text><text class="chevron">›</text>
+				</view>
+			</view>
+			<!-- #endif -->
+		</view>
+	<!-- #ifdef APP -->
+	</scroll-view>
+	<!-- #endif -->
+</template>
+
+<script setup>
+	import { fontData } from '@/uni_modules/uni-icons/components/uni-icons/uniicons_file_vue.js'
+	import { openProfile } from './account.js'
+	// #ifdef APP
+	import starterConfig from '@/uni-starter.config.js'
+	import callCheckVersion from '@/uni_modules/uni-upgrade-center-app/utils/call-check-version.ts'
+	import { shareLink } from './share.js'
+	// #endif
+
+	const { store } = getCurrentInstance().proxy.$uniIdPagesStore
+	const userInfo = computed(() => store.userInfo || {})
+	const avatarUrl = ref('')
+	watch(() => store.hasLogin ? userInfo.value.avatar_file?.url : '', async (src, previous, onCleanup) => {
+		let current = true
+		onCleanup(() => { current = false })
+		avatarUrl.value = ''
+		if (!src) return
+		if (!src.startsWith('cloud://')) {
+			avatarUrl.value = src
+			return
+		}
+		try {
+			const result = await uniCloud.getTempFileURL({ fileList: [src] })
+			if (current) avatarUrl.value = result.fileList[0]?.tempFileURL || ''
+		} catch (err) {
+			console.warn('获取头像失败', err)
+		}
+	}, { immediate: true })
+
+	function icon(name) { return fontData.find(item => item.font_class === name)?.unicode || '' }
+	function navigate(url) {
+		uni.navigateTo({ url, fail: () => uni.showToast({ title: '页面暂时无法打开', icon: 'none' }) })
+	}
+
+	// #ifdef APP
+	const config = getApp().globalData?.config || starterConfig
+	const appInfo = uni.getAppBaseInfo()
+	const versionText = [appInfo.appVersion, appInfo.appVersionCode].filter(Boolean).join('-')
+	const hasUpdate = ref(false)
+	let versionRequest = null
+	let openingUpdate = false
+
+	async function checkVersion(interactive) {
+		if (interactive && openingUpdate) return
+		if (interactive) openingUpdate = true
+		try {
+			if (!versionRequest) versionRequest = callCheckVersion().finally(() => { versionRequest = null })
+			const info = await versionRequest
+			hasUpdate.value = info.code > 0
+			if (!interactive) return
+			if (!hasUpdate.value) {
+				uni.showToast({ title: info.message || '当前已是最新版本', icon: 'none' })
+				return
+			}
+			if (info.url?.startsWith('cloud://')) {
+				const result = await uniCloud.getTempFileURL({ fileList: [info.url] })
+				info.url = result.fileList[0].tempFileURL
+			}
+			// 与升级中心 x 弹窗共用同一份包信息，避免再次检查版本。
+			const key = '__package_info__'
+			uni.setStorageSync(key, info)
+			uni.openDialogPage({
+				url: '/uni_modules/uni-upgrade-center-app/pages/uni-app-x/upgrade-popup?local_storage_key=' + key,
+				disableEscBack: true,
+				fail: () => {
+					uni.removeStorageSync(key)
+					uni.showModal({
+						title: '发现新版本 ' + info.version, content: info.contents || info.title,
+						showCancel: !info.is_mandatory, confirmText: '复制链接',
+						success: res => { if (res.confirm) uni.setClipboardData({ data: info.url }) }
+					})
+				}
+			})
+		} catch (err) {
+			if (err?.code === 0) hasUpdate.value = false
+			if (interactive) uni.showToast({ title: err?.message || err?.errMsg || (typeof err === 'string' ? err : '检查更新失败'), icon: 'none' })
+		} finally {
+			if (interactive) openingUpdate = false
+		}
+	}
+
+	async function shareInvite() {
+		try {
+			const result = await uniCloud.databaseForJQL().collection('uni-id-users')
+				.where('_id == $cloudEnv_uid').field('my_invite_code').limit(1).get()
+			const code = result.data[0]?.my_invite_code
+			if (!code) return uni.showToast({ title: '尚未生成个人邀请码', icon: 'none' })
+			const base = config.h5.url.replace(/\/+$/, '')
+			const link = `${base}/pages/ucenter/invite/invite?code=${encodeURIComponent('uniInvitationCode:' + code)}`
+			shareLink(link, `${config.about.appName} ${config.about.slogan}`)
+		} catch (err) {
+			uni.showToast({ title: err.errMsg || '获取邀请码失败', icon: 'none' })
+		}
+	}
+	// #endif
+	onPageShow(() => {
+		uni.$emit('routeChange')
+		// #ifdef APP
+		checkVersion(false)
+		// #endif
+	})
+</script>
+
+<style scoped>
+	@font-face { font-family: CenterIcons; src: url('../../uni_modules/uni-icons/components/uni-icons/uniicons.ttf'); }
+	.center-scroll { flex: 1; }
+	.center { display: flex; flex-direction: column; width: 100%; background-color: #f7f8fa; }
+	.user-info { display: flex; flex-direction: column; align-items: center; padding: 60px 16px 40px; background-color: #42b983; background-image: linear-gradient(to bottom right, #42b983, #359568); }
+	.avatar, .default-avatar { width: 76px; height: 76px; border: 3px solid rgba(255,255,255,0.5); border-radius: 40px; }
+	.default-avatar { display: flex; flex-direction: row; align-items: center; justify-content: center; background-color: rgba(255,255,255,0.2); }
+	.avatar-icon { font-family: CenterIcons; color: #ffffff; font-size: 48px; }
+	.user-name { margin-top: 14px; font-size: 20px; font-weight: bold; color: #ffffff; }
+	.center-list { display: flex; flex-direction: column; margin: 12px 16px 0; border-radius: 12px; background-color: #ffffff; overflow: hidden; }
+	.menu-row { display: flex; flex-direction: row; align-items: center; min-height: 48px; padding: 0 16px; border-bottom: 1px solid #edf1ef; }
+	.menu-icon { font-family: CenterIcons; color: #6c757d; font-size: 20px; margin-right: 12px; }
+	.menu-title { flex: 1; font-size: 16px; color: #2c3e50; }
+	.version { font-size: 13px; color: #6c757d; }
+	.badge { margin-left: 6px; width: 8px; height: 8px; border-radius: 4px; background-color: #e74c3c; }
+	.chevron { margin-left: 8px; font-size: 22px; color: #929d99; }
+	.pressed { background-color: #e6fcf5; }
+	/* #ifdef WEB */
+	@media screen and (min-width: 768px) {
+		.center { max-width: 1200px; margin: 0 auto; }
+		.user-info { padding-top: 80px; padding-bottom: 50px; }
+		.center-list { margin: 16px 32px 0; }
+	}
+	/* #endif */
+</style>

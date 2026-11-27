@@ -1,0 +1,98 @@
+<template>
+	<view class="invite">
+		<view class="app-info">
+			<image class="logo-img" :src="about.logo" mode="aspectFit" />
+			<text class="app-name">{{ about.appName }}</text>
+			<text class="tip">{{ about.slogan }}</text>
+			<view class="download" hover-class="download-pressed" @click="download">
+				<!-- #ifdef WEB -->
+				<image class="icon" mode="aspectFit" :src="isIos ? '/static/h5/download-app/ios.png' : '/static/h5/download-app/android.png'" />
+				<!-- #endif -->
+				<text class="download-text">下载</text>
+			</view>
+			<text class="tip">Version {{ about.version }}</text>
+		</view>
+		<text class="copyright">{{ about.company }}</text>
+		<!-- #ifdef WEB -->
+		<view v-if="showMask" class="mask" @click="showMask = false">
+			<image class="mask-image" src="/static/h5/download-app/openImg.png" mode="widthFix" />
+		</view>
+		<!-- #endif -->
+	</view>
+</template>
+
+<script setup>
+	import starterConfig from '@/uni-starter.config.js'
+
+	const config = getApp().globalData?.config || starterConfig
+	const about = config.about
+	const code = ref('')
+	const isIos = uni.getDeviceInfo().osName?.toLowerCase() === 'ios'
+	// #ifdef WEB
+	const isWeixin = /micromessenger/i.test(navigator.userAgent)
+	const showMask = ref(false)
+	let restoreBanner = null
+	// common/openApp.js 给 body 设置了横幅占位，只在横幅实际存在时临时收起。
+	onPageShow(() => {
+		const banner = document.getElementById('openApp')
+		if (!banner || restoreBanner) return
+		const body = document.body.style
+		const { display } = banner.style
+		const { height, marginTop } = body
+		banner.style.display = 'none'
+		body.height = ''
+		body.marginTop = ''
+		restoreBanner = () => {
+			banner.style.display = display
+			body.height = height
+			body.marginTop = marginTop
+			restoreBanner = null
+		}
+	})
+	onPageHide(() => { restoreBanner?.() })
+	onUnload(() => { restoreBanner?.() })
+	// #endif
+
+	function openDownload() {
+		const url = isIos ? config.download?.ios : config.download?.android
+		if (!url) {
+			uni.showToast({ title: '尚未配置此平台的下载地址', icon: 'none' })
+			return
+		}
+		// #ifdef WEB
+		if (!isIos && isWeixin) {
+			showMask.value = true
+			return
+		}
+		window.location.assign(url)
+		// #endif
+		// #ifndef WEB
+		uni.showModal({
+			title: '在浏览器中下载', content: url, confirmText: '复制链接',
+			success: ({ confirm }) => { if (confirm) uni.setClipboardData({ data: url }) }
+		})
+		// #endif
+	}
+	function download() {
+		if (!code.value) return openDownload()
+		uni.setClipboardData({ data: code.value, showToast: false, complete: openDownload })
+	}
+	onLoad(options => { code.value = options?.code || '' })
+</script>
+
+<style scoped>
+	.invite { display: flex; flex-direction: column; flex: 1; min-height: 100%; }
+	.app-info { display: flex; flex-direction: column; align-items: center; margin-top: 100px; }
+	.logo-img { width: 80px; height: 80px; border-radius: 15px; }
+	.app-name { margin-top: 20px; color: #2c3e50; font-size: 22px; font-weight: bold; }
+	.tip { margin-top: 10px; font-size: 14px; color: #526367; }
+	.download { display: flex; flex-direction: row; align-items: center; justify-content: center; min-height: 40px; min-width: 100px; margin: 26px 0 12px; padding: 0 14px; border-radius: 22px; background-color: #2a9839; }
+	.download-pressed { background-color: #247e31; }
+	.icon { width: 18px; height: 20px; margin-right: 6px; }
+	.download-text { color: #ffffff; font-size: 16px; }
+	.copyright { position: fixed; bottom: 20px; left: 0; right: 0; text-align: center; color: #808b90; font-size: 13px; }
+	/* #ifdef WEB */
+	.mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; display: flex; flex-direction: row; align-items: flex-start; justify-content: flex-end; z-index: 10; background-color: rgba(0,0,0,0.6); }
+	.mask-image { width: 80%; max-width: 420px; }
+	/* #endif */
+</style>

@@ -1,0 +1,20 @@
+<template>
+	<view class="error-page">
+		<text class="error-title">404 页面未找到</text>
+		<text v-if="errMsg" class="error-message">{{ errMsg }}</text>
+	</view>
+</template>
+
+<script setup>
+	const errMsg = ref('')
+	onLoad(query => { errMsg.value = query?.errMsg || query?.msg || '' })
+</script>
+
+<style scoped>
+	.error-page { display: flex; flex-direction: column; }
+	/* #ifndef WEB */
+	.error-page { padding-top: 85px; }
+	/* #endif */
+	.error-title { font-size: 25px; color: #333333; }
+	.error-message { font-size: 18px; color: #999999; }
+</style>

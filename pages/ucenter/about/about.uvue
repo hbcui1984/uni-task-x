@@ -1,0 +1,117 @@
+<template>
+	<!-- #ifdef APP -->
+	<scroll-view class="about-scroll" direction="vertical">
+	<!-- #endif -->
+		<view class="about">
+			<view class="app-info">
+				<image class="logo-img" :src="about.logo" mode="aspectFit" />
+				<text class="app-name">{{ about.appName }}</text>
+				<text class="tip">Version {{ version }}</text>
+				<template v-if="about.download">
+					<!-- #ifdef MP-ALIPAY -->
+					<canvas id="downloadQr" class="qrcode" type="2d" @ready="drawQrCode"></canvas>
+					<!-- #endif -->
+					<!-- #ifndef MP-ALIPAY -->
+					<canvas id="downloadQr" class="qrcode" type="2d"></canvas>
+					<!-- #endif -->
+					<text class="tip">{{ qrFailed ? '可通过下方链接下载' : '扫码下载 ' + about.appName + ' 客户端' }}</text>
+					<button class="share-button" @click="shareDownload">{{ shareLabel }}</button>
+				</template>
+				<text v-else class="hint">暂未提供下载链接</text>
+			</view>
+			<view class="copyright">
+				<view class="agreements">
+					<view v-for="(agreement, index) in agreements" :key="agreement.title" class="agreement-item">
+						<text v-if="index" class="hint">和</text>
+						<text class="agreement" @click="openAgreement(agreement)">《{{ agreement.title }}》</text>
+					</view>
+				</view>
+				<text class="hint">Copyright © {{ year }}</text>
+				<text class="hint">{{ about.company }}</text>
+			</view>
+		</view>
+	<!-- #ifdef APP -->
+	</scroll-view>
+	<!-- #endif -->
+</template>
+
+<script setup>
+	import starterConfig from '@/uni-starter.config.js'
+	import idConfig from '@/uni_modules/uni-id-pages/config.js'
+	import UQRCode from '@/uni_modules/Sansnn-uQRCode/js_sdk/uqrcode/uqrcode.js'
+	import { shareLink } from '../share.js'
+
+	const about = (getApp().globalData?.config || starterConfig).about
+	const year = new Date().getFullYear()
+	const agreements = [
+		{ title: '用户服务协议', url: idConfig.agreements?.serviceUrl },
+		{ title: '隐私政策条款', url: idConfig.agreements?.privacyUrl }
+	].filter(item => item.url)
+	// #ifdef APP
+	const version = uni.getAppBaseInfo().appVersion || about.version
+	const shareLabel = '分享下载链接'
+	// #endif
+	// #ifndef APP
+	const version = about.version
+	const shareLabel = '复制下载链接'
+	// #endif
+	const qrFailed = ref(false)
+
+	function drawQrCode() {
+		if (!about.download) return
+		uni.createCanvasContextAsync({
+			id: 'downloadQr',
+			success: context => {
+				try {
+					const qr = new UQRCode()
+					qr.data = about.download
+					qr.make()
+					const ctx = context.getContext('2d')
+					// 四周留四格静区，并按整像素绘制，保证高分屏能扫码。
+					const count = qr.modules.length + 8
+					const cell = Math.max(1, Math.ceil(100 * uni.getWindowInfo().pixelRatio / count))
+					const size = count * cell
+					ctx.canvas.width = size
+					ctx.canvas.height = size
+					ctx.fillStyle = '#ffffff'
+					ctx.fillRect(0, 0, size, size)
+					ctx.fillStyle = '#000000'
+					qr.modules.forEach((row, y) => row.forEach((module, x) => {
+						if (module.isBlack) ctx.fillRect((x + 4) * cell, (y + 4) * cell, cell, cell)
+					}))
+				} catch (err) {
+					qrFailed.value = true
+				}
+			},
+			fail: () => { qrFailed.value = true }
+		})
+	}
+	function shareDownload() {
+		shareLink(about.download, `${about.appName} ${about.slogan}`)
+	}
+	function openAgreement(agreement) {
+		uni.navigateTo({
+			url: `/uni_modules/uni-id-pages/pages/common/webview/webview?url=${encodeURIComponent(agreement.url)}&title=${encodeURIComponent(agreement.title)}`
+		})
+	}
+	onLoad(() => uni.setNavigationBarTitle({ title: '关于 ' + about.appName }))
+	// #ifndef MP-ALIPAY
+	onReady(drawQrCode)
+	// #endif
+</script>
+
+<style scoped>
+	.about-scroll { flex: 1; }
+	.about { display: flex; flex-direction: column; align-items: center; min-height: 100%; }
+	.app-info { display: flex; flex-direction: column; align-items: center; margin-top: 60px; }
+	.logo-img { width: 80px; height: 80px; border-radius: 15px; }
+	.app-name { margin-top: 20px; font-size: 22px; font-weight: bold; color: #2c3e50; }
+	.tip { margin-top: 10px; font-size: 14px; color: #526367; text-align: center; }
+	.qrcode { width: 100px; height: 100px; margin-top: 12px; }
+	.share-button { margin-top: 12px; font-size: 14px; color: #359568; }
+	.copyright { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: flex-end; padding: 32px 16px 20px; }
+	.agreements, .agreement-item { display: flex; flex-direction: row; align-items: center; justify-content: center; }
+	.agreements { flex-wrap: wrap; }
+	.agreement { color: #2285ff; font-size: 13px; }
+	.hint { margin-top: 4px; color: #808b90; font-size: 13px; text-align: center; }
+</style>

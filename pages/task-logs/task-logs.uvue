@@ -1,0 +1,299 @@
+<template>
+	<view class="task-logs">
+		<view v-if="hasProjects" class="filter-bar">
+			<view class="filter-chip" :class="{ 'active-chip': selectedProjectId }" @click="pickerType = 'project'">
+				<text class="chip-text" :class="{ 'selected-text': selectedProjectId }">{{ projectLabel }}</text>
+				<text class="arrow">⌄</text>
+			</view>
+			<view class="filter-chip" :class="{ 'active-chip': selectedMemberId }" @click="pickerType = 'member'">
+				<text class="chip-text" :class="{ 'selected-text': selectedMemberId }">{{ memberLabel }}</text>
+				<text class="arrow">⌄</text>
+			</view>
+		</view>
+		<!-- #ifdef APP -->
+		<list-view class="native-list" direction="vertical" :refresher-enabled="true" :refresher-triggered="refreshing"
+			:lower-threshold="100" @refresherrefresh="refresh" @scrolltolower="loadMore">
+		<!-- #endif -->
+			<!-- #ifdef APP -->
+			<list-item v-if="logs.length === 0" :type="1">
+			<!-- #endif -->
+			<view v-if="logs.length === 0" class="state-row" @click="retryFirstPage">
+				<text class="state-text">{{ emptyLabel }}</text>
+			</view>
+			<!-- #ifdef APP -->
+			</list-item>
+			<sticky-section v-for="group in groupedLogs" :key="group.date">
+			<!-- #endif -->
+			<!-- #ifndef APP -->
+			<view v-for="group in groupedLogs" :key="group.date" class="log-group">
+			<!-- #endif -->
+				<!-- #ifdef APP -->
+				<sticky-header>
+				<!-- #endif -->
+					<view class="date-divider"><text class="date-text">{{ formatDateLabel(group.date) }}</text></view>
+				<!-- #ifdef APP -->
+				</sticky-header>
+				<list-item v-for="log in group.logs" :key="log._id" :type="2">
+				<!-- #endif -->
+				<!-- #ifndef APP -->
+				<view v-for="log in group.logs" :key="log._id">
+				<!-- #endif -->
+					<view class="log-row" hover-class="pressed" @click="goToTaskDetail(log)">
+						<view class="log-avatar"><text class="action-icon">{{ actionIcons[log.action_type] || 'i' }}</text></view>
+						<view class="log-content">
+							<text class="log-user">{{ log.user_nickname || '未知用户' }}</text>
+							<text class="log-detail">{{ log.action_detail }}</text>
+							<text v-if="!selectedProjectId" class="log-project">项目：{{ log.project_name || '未知项目' }}</text>
+							<text class="log-time">{{ formatTime(log.create_time) }}</text>
+						</view>
+					</view>
+				<!-- #ifndef APP -->
+				</view>
+				<!-- #endif -->
+				<!-- #ifdef APP -->
+				</list-item>
+				<!-- #endif -->
+			<!-- #ifndef APP -->
+			</view>
+			<!-- #endif -->
+			<!-- #ifdef APP -->
+			</sticky-section>
+			<list-item v-if="logs.length" :type="3">
+			<!-- #endif -->
+			<view v-if="logs.length" class="load-more" @click="loadMore">
+				<text class="more-text">{{ moreLabel }}</text>
+			</view>
+			<!-- #ifdef APP -->
+			</list-item>
+		</list-view>
+		<!-- #endif -->
+
+		<view v-if="pickerType" class="picker-mask" @click="pickerType = ''">
+			<view class="picker-panel" @click.stop>
+				<view class="picker-header">
+					<text class="picker-title">{{ pickerType === 'project' ? '筛选项目' : '筛选成员' }}</text>
+					<text class="picker-close" @click="pickerType = ''">关闭</text>
+				</view>
+				<scroll-view class="picker-scroll" direction="vertical"
+					<!-- #ifdef MP-ALIPAY -->
+					:scroll-y="true"
+					<!-- #endif -->
+				>
+					<view v-for="item in pickerOptions" :key="item.value" class="picker-item"
+						:class="{ 'pressed': item.value === pickerValue }" @click="selectOption(item.value)">
+						<text class="option-text" :class="{ 'selected-text': item.value === pickerValue }">{{ item.text }}</text>
+						<text v-if="item.value === pickerValue" class="selected-text">✓</text>
+					</view>
+				</scroll-view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+	import { formatDateLabel, formatTime } from '@/utils/date.js'
+	import { getCurrentUserId } from '@/utils/auth.js'
+
+	const allProjects = { value: '', text: '全部项目' }
+	const allMembers = { value: '', text: '全部成员' }
+	const projectOptions = ref([allProjects])
+	const memberOptions = ref([allMembers])
+	const selectedProjectId = ref('')
+	const selectedMemberId = ref('')
+	const pickerType = ref('')
+	const projectLabel = computed(() => projectOptions.value.find(item => item.value === selectedProjectId.value)?.text || allProjects.text)
+	const memberLabel = computed(() => memberOptions.value.find(item => item.value === selectedMemberId.value)?.text || allMembers.text)
+	const pickerOptions = computed(() => pickerType.value === 'project' ? projectOptions.value : memberOptions.value)
+	const pickerValue = computed(() => pickerType.value === 'project' ? selectedProjectId.value : selectedMemberId.value)
+	const logs = ref([])
+	const total = ref(0)
+	const hasProjects = ref(true)
+	const loading = ref(false)
+	const refreshing = ref(false)
+	const loadError = ref(false)
+	const actionIcons = { create: '+', update: '✎', delete: '×', complete: '✓' }
+	let page = 0
+	let requestId = 0
+	let ownerId = null
+	let filtersRequest = 0
+	const emptyLabel = computed(() => {
+		if (loading.value) return '加载中...'
+		if (loadError.value) return '加载失败，点击重试'
+		return hasProjects.value ? '暂无动态' : '您还没有参与任何项目，无法查看动态'
+	})
+	const moreLabel = computed(() => {
+		if (loading.value) return '加载中...'
+		if (loadError.value) return '加载失败，点击重试'
+		return logs.value.length < total.value ? '上拉加载更多' : '没有更多数据了'
+	})
+	const groupedLogs = computed(() => {
+		const groups = []
+		for (const log of logs.value) {
+			const date = new Date(log.create_time).toISOString().slice(0, 10)
+			let group = groups[groups.length - 1]
+			if (!group || group.date !== date) {
+				group = { date, logs: [] }
+				groups.push(group)
+			}
+			group.logs.push(log)
+		}
+		return groups
+	})
+
+	async function loadFilters(uid) {
+		const id = ++filtersRequest
+		if (!uid) return
+		try {
+			const db = uniCloud.databaseForJQL()
+			const cmd = db.command
+			const projects = await db.collection('opendb-projects')
+				.where(cmd.or([{ members: cmd.all([uid]) }, { managers: cmd.all([uid]) }]))
+				.field('_id,name,members,managers').get()
+			if (id !== filtersRequest) return
+			projectOptions.value = [allProjects, ...projects.data.map(p => ({ value: p._id, text: p.name }))]
+			const ids = [...new Set(projects.data.flatMap(p => [...(p.members || []), ...(p.managers || [])]))]
+			if (!ids.length) return
+			const users = await db.collection('uni-id-users').where({ _id: cmd.in(ids) }).field('_id,nickname').get()
+			if (id === filtersRequest) {
+				memberOptions.value = [allMembers, ...users.data.map(u => ({ value: u._id, text: u.nickname || '未命名用户' }))]
+			}
+		} catch (err) {
+			if (id === filtersRequest) uni.showToast({ title: err.errMsg || '获取筛选选项失败', icon: 'none' })
+		}
+	}
+
+	async function loadLogs(clear) {
+		if (!clear && (loading.value || !page || logs.value.length >= total.value)) return
+		const id = ++requestId
+		const nextPage = clear ? 1 : page + 1
+		if (clear) {
+			page = 0
+			logs.value = []
+			total.value = 0
+		}
+		loading.value = true
+		loadError.value = false
+		try {
+			const taskLogsCo = uniCloud.importObject('task-logs-co', { customUI: true })
+			const res = await taskLogsCo.getAllLogs({
+				project_id: selectedProjectId.value || undefined,
+				user_id: selectedMemberId.value || undefined,
+				page: nextPage,
+				page_size: 20
+			})
+			// 切换筛选或账号后，旧请求不能再覆盖新列表。
+			if (id !== requestId) return
+			if (res.code !== 0) throw new Error(res.message || '加载动态失败')
+			logs.value = clear ? res.data.list : logs.value.concat(res.data.list)
+			total.value = res.data.total
+			hasProjects.value = res.data.has_projects
+			page = nextPage
+		} catch (err) {
+			if (id === requestId) {
+				loadError.value = true
+				uni.showToast({ title: err.message || err.errMsg || '加载动态失败', icon: 'none' })
+			}
+		} finally {
+			if (id === requestId) {
+				loading.value = false
+				if (refreshing.value) {
+					refreshing.value = false
+					uni.stopPullDownRefresh()
+				}
+			}
+		}
+	}
+
+	function loadMore() { return loadLogs(false) }
+	function retryFirstPage() { if (loadError.value) loadLogs(true) }
+	function refresh() {
+		if (refreshing.value) return
+		refreshing.value = true
+		return loadLogs(true)
+	}
+	function selectOption(value) {
+		if (pickerType.value === 'project') selectedProjectId.value = value
+		else selectedMemberId.value = value
+		pickerType.value = ''
+		loadLogs(true)
+	}
+	function goToTaskDetail(log) {
+		if (!log.task_id) {
+			uni.showToast({ title: '该任务已被删除', icon: 'none' })
+			return
+		}
+		uni.navigateTo({ url: `/pages/opendb-task/detail?id=${encodeURIComponent(log.task_id)}&pid=${encodeURIComponent(log.project_id)}` })
+	}
+	onLoad(options => { selectedProjectId.value = options?.project_id || '' })
+	onPageShow(() => {
+		uni.$emit('routeChange')
+		const uid = getCurrentUserId()
+		if (uid === ownerId) return
+		if (ownerId !== null) selectedProjectId.value = ''
+		ownerId = uid
+		selectedMemberId.value = ''
+		projectOptions.value = [allProjects]
+		memberOptions.value = [allMembers]
+		hasProjects.value = true
+		loadFilters(uid)
+		loadLogs(true)
+	})
+	onPageHide(() => { pickerType.value = '' })
+	onUnload(() => { requestId++; filtersRequest++ })
+	onPullDownRefresh(refresh)
+	// #ifndef APP
+	onReachBottom(loadMore)
+	// #endif
+	// #ifdef APP
+	onBackPress(() => {
+		if (!pickerType.value) return false
+		pickerType.value = ''
+		return true
+	})
+	// #endif
+</script>
+
+<style scoped>
+	.task-logs { display: flex; flex-direction: column; flex: 1; padding: 16px; background-color: #f7f8fa; }
+	.native-list { flex: 1; border-radius: 12px; }
+	.filter-bar { display: flex; flex-direction: row; flex-wrap: wrap; margin-bottom: 12px; }
+	.filter-chip { display: flex; flex-direction: row; align-items: center; padding: 6px 12px; margin-right: 8px; border: 1px solid #e0e6e3; border-radius: 16px; background-color: #ffffff; }
+	.active-chip { background-color: #e6fcf5; border-color: #42b983; }
+	.chip-text { max-width: 120px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: #606b70; }
+	.arrow { margin-left: 4px; font-size: 14px; color: #6c757d; }
+	.log-group { display: flex; flex-direction: column; }
+	.date-divider { display: flex; flex-direction: row; padding: 12px 20px; background-color: #359568; }
+	.date-text { color: #ffffff; font-size: 14px; font-weight: bold; }
+	.log-row { display: flex; flex-direction: row; align-items: flex-start; padding: 14px 16px; background-color: #ffffff; border-bottom: 1px solid #e9ecef; }
+	.log-avatar { display: flex; flex-direction: row; align-items: center; justify-content: center; width: 36px; height: 36px; margin-right: 12px; border-radius: 18px; background-color: #e6fcf5; }
+	.action-icon { color: #50685b; font-size: 20px; }
+	.log-content { flex: 1; display: flex; flex-direction: column; }
+	.log-user { color: #359568; font-weight: bold; font-size: 15px; margin-bottom: 6px; }
+	.log-detail { color: #2c3e50; font-size: 14px; line-height: 22px; margin-bottom: 6px; }
+	.log-project { color: #6c757d; font-size: 13px; margin-bottom: 4px; }
+	.log-time { color: #899497; font-size: 12px; }
+	.state-row { display: flex; flex-direction: row; justify-content: center; padding: 48px 16px; background-color: #ffffff; }
+	.state-text { font-size: 15px; color: #808b90; }
+	.load-more { display: flex; flex-direction: row; justify-content: center; padding: 16px; }
+	.more-text { color: #359568; font-size: 14px; }
+	.picker-mask { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 20; display: flex; flex-direction: column; justify-content: flex-end; background-color: rgba(0,0,0,0.4); }
+	.picker-panel { display: flex; flex-direction: column; background-color: #ffffff; border-radius: 16px 16px 0 0; }
+	.picker-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e9ecef; }
+	.picker-title { font-size: 16px; font-weight: bold; color: #2c3e50; }
+	.picker-close { padding: 6px; font-size: 14px; color: #6c757d; }
+	.picker-scroll { height: 280px; }
+	.picker-item { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #f1f3f2; }
+	.option-text { font-size: 15px; color: #2c3e50; }
+	.selected-text { color: #359568; }
+	.pressed { background-color: #e6fcf5; }
+	/* #ifndef APP */
+	.date-divider { position: sticky; top: 0; z-index: 1; }
+	.log-detail { white-space: pre-wrap; }
+	/* #endif */
+	/* #ifdef WEB */
+	@media screen and (min-width: 768px) {
+		.task-logs { width: 100%; max-width: 1200px; margin: 0 auto; padding: 32px 48px; box-sizing: border-box; }
+		.log-row { padding: 16px 24px; }
+	}
+	/* #endif */
+</style>

@@ -1,0 +1,128 @@
+<template>
+	<view class="settings">
+		<view class="section">
+			<view class="setting-row" hover-class="pressed" @click="openProfile(store.hasLogin)">
+				<text class="label">个人信息</text><text class="chevron">›</text>
+			</view>
+			<view v-if="store.userInfo.mobile" class="setting-row" hover-class="pressed" @click="changePassword">
+				<text class="label">修改密码</text><text class="chevron">›</text>
+			</view>
+		</view>
+		<!-- #ifdef APP || MP-WEIXIN -->
+		<view class="section">
+			<!-- #ifdef APP -->
+			<view class="setting-row" hover-class="pressed" @click="clearTmp">
+				<text class="label">清除缓存</text><text class="chevron">›</text>
+			</view>
+			<view class="setting-row" hover-class="pressed" @click="openNotificationSettings">
+				<text class="label">推送服务</text><text class="status">{{ notificationStatus }}</text><text class="chevron">›</text>
+			</view>
+			<!-- #endif -->
+			<view v-for="mode in supportedModes" :key="mode" class="setting-row" hover-class="pressed" @click="authenticate(mode)">
+				<text class="label">{{ modeLabels[mode] }}</text><text class="chevron">›</text>
+			</view>
+		</view>
+		<!-- #endif -->
+		<view class="login-row" hover-class="pressed" @click="changeLoginState">
+			<text class="login-text">{{ store.hasLogin ? '退出登录' : '登录' }}</text>
+		</view>
+	</view>
+</template>
+
+<script setup>
+	import { loginUrl, openProfile } from '../account.js'
+
+	const { store, mutations } = getCurrentInstance().proxy.$uniIdPagesStore
+	let loggingOut = false
+
+	function changePassword() {
+		const phone = encodeURIComponent(store.userInfo.mobile)
+		uni.navigateTo({ url: '/uni_modules/uni-id-pages/pages/retrieve/retrieve?phoneNumber=' + phone })
+	}
+	async function changeLoginState() {
+		if (!store.hasLogin) {
+			uni.redirectTo({ url: loginUrl() })
+			return
+		}
+		if (loggingOut) return
+		loggingOut = true
+		try {
+			await mutations.logout()
+		} finally {
+			loggingOut = false
+		}
+	}
+
+	// #ifdef APP
+	const notificationStatus = ref('系统设置')
+	let clearing = false
+	function openNotificationSettings() {
+		uni.openAppAuthorizeSetting({ fail: () => uni.showToast({ title: '请在系统设置中管理通知', icon: 'none' }) })
+	}
+	async function clearTmp() {
+		if (clearing) return
+		clearing = true
+		uni.showLoading({ title: '清理中...', mask: true })
+		let title = '清理完成'
+		try {
+			const fs = uni.getFileSystemManager()
+			const files = await new Promise((resolve, reject) => {
+				fs.getSavedFileList({ success: res => resolve(res.fileList), fail: reject })
+			})
+			for (const filePath of files) {
+				await new Promise((resolve, reject) => fs.removeSavedFile({ filePath, success: resolve, fail: reject }))
+			}
+		} catch (err) {
+			title = '清理缓存失败，请重试'
+		} finally {
+			clearing = false
+			uni.hideLoading()
+			uni.showToast({ title, icon: 'none' })
+		}
+	}
+	onPageShow(() => {
+		const state = uni.getAppAuthorizeSetting().notificationAuthorized
+		notificationStatus.value = state === 'authorized' ? '已开启' : state === 'denied' ? '已关闭' : '系统设置'
+	})
+	// #endif
+
+	// #ifdef APP || MP-WEIXIN
+	const modeLabels = { fingerPrint: '指纹识别', facial: '面容识别' }
+	const supportedModes = ref([])
+	function authenticate(mode) {
+		const title = modeLabels[mode]
+		uni.checkIsSoterEnrolledInDevice({
+			checkAuthMode: mode,
+			success: ({ isEnrolled }) => {
+				if (!isEnrolled) {
+					uni.showToast({ title: `设备未开启${title}`, icon: 'none' })
+					return
+				}
+				uni.startSoterAuthentication({
+					requestAuthModes: [mode], challenge: '123456', authContent: `请进行${title}`,
+					success: res => uni.showToast({ title: res.errCode === 0 ? `${title}验证成功` : '验证失败，请重试', icon: 'none' }),
+					fail: () => uni.showToast({ title: '认证失败', icon: 'none' })
+				})
+			},
+			fail: () => uni.showToast({ title: `${title}不可用`, icon: 'none' })
+		})
+	}
+	onLoad(() => {
+		uni.checkIsSupportSoterAuthentication({
+			success: ({ supportMode }) => { supportedModes.value = supportMode.filter(mode => modeLabels[mode]) }
+		})
+	})
+	// #endif
+</script>
+
+<style scoped>
+	.settings { display: flex; flex-direction: column; flex: 1; background-color: #f7f8fa; }
+	.section { display: flex; flex-direction: column; margin-top: 10px; background-color: #ffffff; }
+	.setting-row { display: flex; flex-direction: row; align-items: center; padding: 0 16px; min-height: 48px; border-bottom: 1px solid #edf1ef; }
+	.label { flex: 1; color: #2c3e50; font-size: 16px; }
+	.status { color: #6c757d; font-size: 14px; }
+	.chevron { margin-left: 8px; color: #929d99; font-size: 22px; }
+	.login-row { display: flex; flex-direction: row; align-items: center; justify-content: center; min-height: 44px; margin-top: 10px; background-color: #ffffff; }
+	.login-text { color: #2c3e50; font-size: 17px; }
+	.pressed { background-color: #e6fcf5; }
+</style>
