@@ -25,7 +25,7 @@
   </view>
 </template>
 
-<script>
+<script lang="uts">
   import { dataPicker } from "./uni-data-picker.uts"
 
   /**

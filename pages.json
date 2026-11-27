@@ -1,4 +1,10 @@
 {
+	"easycom": {
+		"custom": {
+			// uni-list-item is also the Web name of the uni-app x built-in list-item.
+			"^task-list-row$": "@/uni_modules/uni-list/components/uni-list-item/uni-list-item.vue"
+		}
+	},
 	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
 		{
 			"path": "pages/opendb-projects/list",

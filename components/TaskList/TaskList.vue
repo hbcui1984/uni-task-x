@@ -32,7 +32,7 @@
           />
 
           <!-- PC端：原有布局 -->
-          <uni-list-item v-else :clickable="true">
+          <task-list-row v-else :clickable="true">
             <template v-slot:header>
               <checkbox @click.stop="finishTask(item._id)" color="#42b983" />
             </template>
@@ -70,7 +70,7 @@
                 </view>
               </view>
             </template>
-          </uni-list-item>
+          </task-list-row>
 
           <!-- 下拉菜单挂在 task-item-wrapper，脱离 uni-list-item 的 overflow 约束 -->
           <view v-if="isPC && openPriorityTaskId === item._id" class="priority-dropdown task-item-dropdown" @click.stop>
@@ -179,7 +179,7 @@
           />
 
           <!-- PC端：原有布局 -->
-          <uni-list-item v-else :clickable="true">
+          <task-list-row v-else :clickable="true">
             <template v-slot:header>
               <checkbox @click.stop="finishTask(item._id)" color="#42b983" />
             </template>
@@ -217,7 +217,7 @@
                 </view>
               </view>
             </template>
-          </uni-list-item>
+          </task-list-row>
 
           <!-- 下拉菜单挂在 task-item-wrapper，脱离 uni-list-item 的 overflow 约束 -->
           <view v-if="isPC && openPriorityTaskId === item._id" class="priority-dropdown task-item-dropdown" @click.stop>
@@ -1248,4 +1248,4 @@ export default {
   border-color: #fff !important;
 }
 /* #endif */
-</style> 
+</style>

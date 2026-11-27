@@ -26,7 +26,7 @@
 			</view>
 			<view v-else-if="data && data.length > 0">
 				<uni-list>
-					<uni-list-item v-for="(item, index) in data" :key="index" showArrow :clickable="true"
+					<task-list-row v-for="item in data" :key="item._id" showArrow :clickable="true"
 						@click="handleItemClick(item._id, item.name)">
 						<template v-slot:body>
 							<view class="project-item">
@@ -38,7 +38,7 @@
 								</view>
 							</view>
 						</template>
-					</uni-list-item>
+					</task-list-row>
 				</uni-list>
 			</view>
 			<view v-else class="empty-state">

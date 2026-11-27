@@ -27,7 +27,7 @@
 			</view>
 		</view>
 		<uni-list class="center-list" v-for="(sublist , index) in ucenterList" :key="index">
-			<uni-list-item v-for="(item,i) in sublist" :title="item.title" link :rightText="item.rightText" :key="i"
+			<task-list-row v-for="(item,i) in sublist" :title="item.title" link :rightText="item.rightText" :key="i"
 				:clickable="true" :to="item.to" @click="ucenterListClick(item)" :show-extra-icon="true"
 				:extraIcon="{type:item.icon,color:'#6c757d'}">
 				<template v-slot:footer>
@@ -36,7 +36,7 @@
 						<view class="item-footer-badge"></view>
 					</view>
 				</template>
-			</uni-list-item>
+			</task-list-row>
 		</uni-list>
 	</view>
 </template>

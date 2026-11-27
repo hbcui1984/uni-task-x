@@ -36,23 +36,23 @@
 		<uni-list class="logs-list">
 			<!-- 加载中 -->
 			<template v-if="loading && page === 1">
-				<uni-list-item>
+				<task-list-row>
 					<template v-slot:body>
 						<view class="loading">加载中...</view>
 					</template>
-				</uni-list-item>
+				</task-list-row>
 			</template>
 
 			<!-- 暂无数据 -->
 			<template v-else-if="logs.length === 0">
-				<uni-list-item>
+				<task-list-row>
 					<template v-slot:body>
 						<view class="empty">
 							<text v-if="!hasProjects">您还没有参与任何项目，无法查看动态</text>
 							<text v-else>暂无动态</text>
 						</view>
 					</template>
-				</uni-list-item>
+				</task-list-row>
 			</template>
 
 			<!-- 动态列表 -->
@@ -64,7 +64,7 @@
 					</view>
 
 					<!-- 当天的动态列表 -->
-					<uni-list-item v-for="log in group" :key="log._id" clickable @click="goToTaskDetail(log)">
+					<task-list-row v-for="log in group" :key="log._id" clickable @click="goToTaskDetail(log)">
 						<template v-slot:header>
 							<view class="log-avatar">
 								<uni-icons :type="getActionIcon(log.action_type)" size="18" color="#666"></uni-icons>
@@ -82,7 +82,7 @@
 								<view class="log-time">{{formatTime(log.create_time)}}</view>
 							</view>
 						</template>
-					</uni-list-item>
+					</task-list-row>
 				</block>
 			</template>
 		</uni-list>

@@ -9,7 +9,7 @@
   </view>
 </template>
 
-<script>
+<script lang="uts">
   export default {
     emits: ["modelValue","update:modelValue"],
     props: {
