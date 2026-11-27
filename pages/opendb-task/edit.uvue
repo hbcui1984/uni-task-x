@@ -1,0 +1,139 @@
+<!-- 编辑任务基本信息：/pages/opendb-task/edit?id={taskId}&pid={projectId} -->
+<template>
+	<!-- #ifdef APP -->
+	<scroll-view class="page-scroll" direction="vertical">
+	<!-- #endif -->
+	<view class="edit-page">
+		<view class="card">
+			<view class="field">
+				<text class="label">标题</text>
+				<view class="input-box">
+					<input v-model="formData.title" class="title-input" name="title" placeholder="任务标题" :maxlength="140" :disabled="!loaded || submitting" />
+					<text v-if="formData.title && !submitting" class="clear" @tap="formData.title = ''">清除</text>
+				</view>
+			</view>
+			<view class="field">
+				<text class="label">任务详情</text>
+				<textarea v-model="formData.content" class="description" name="content" placeholder="这里可输入详细描述" :disabled="!loaded || submitting" />
+			</view>
+			<view class="actions">
+				<button class="action primary" :disabled="!loaded || submitting" :loading="submitting" @tap="submit">提交</button>
+				<button class="action" :disabled="submitting" @tap="back">返回</button>
+			</view>
+		</view>
+	</view>
+	<!-- #ifdef APP -->
+	</scroll-view>
+	<!-- #endif -->
+</template>
+
+<script setup>
+const db = uniCloud.databaseForJQL()
+// #ifdef WEB || MP || APP-HARMONY
+const proxy = getCurrentInstance()?.proxy
+// #endif
+const formData = reactive({ title: '', content: '' })
+const loaded = ref(false)
+const submitting = ref(false)
+let taskId = ''
+let projectId = ''
+let opener = null
+let unloaded = false
+let returnTimer = null
+
+function back() {
+	uni.navigateBack({
+		fail: () => {
+			// #ifdef WEB
+			if (window.history.length > 1) {
+				window.history.back()
+				return
+			}
+			// #endif
+			const url = projectId ? `/pages/opendb-task/list?id=${encodeURIComponent(projectId)}` : '/pages/opendb-projects/list'
+			uni.reLaunch({ url })
+		}
+	})
+}
+
+async function getDetail(id) {
+	if (!id) {
+		uni.showToast({ title: '缺少任务 ID', icon: 'none' })
+		return
+	}
+	uni.showLoading({ title: '加载中', mask: true })
+	try {
+		const { data } = await db.collection('opendb-task').doc(id).field('title,content,assignee').get()
+		if (!data.length) throw new Error('任务不存在')
+		formData.title = data[0].title || ''
+		formData.content = data[0].content || ''
+		loaded.value = true
+	} catch (error) {
+		if (!unloaded) uni.showModal({ content: error.errMsg || error.message || '请求服务失败', showCancel: false })
+	} finally {
+		if (!unloaded) uni.hideLoading()
+	}
+}
+
+async function submit() {
+	if (!loaded.value || submitting.value) return
+	const title = formData.title.trim()
+	if (title.length < 3) {
+		uni.showToast({ title: '任务标题至少需要 3 个字符', icon: 'none' })
+		return
+	}
+	submitting.value = true
+	try {
+		await db.collection('opendb-task').doc(taskId).update({ title, content: formData.content.trimEnd() })
+	} catch (error) {
+		submitting.value = false
+		if (!unloaded) uni.showModal({ content: error.errMsg || error.message || '请求服务失败', showCancel: false })
+		return
+	}
+	if (opener) opener.emit('refreshData')
+	else uni.$emit('refreshData', { taskId, projectId })
+	if (unloaded) return
+	uni.showToast({ title: '修改成功', icon: 'success' })
+	returnTimer = setTimeout(back, 500)
+}
+
+onLoad(options => {
+	// #ifdef WEB || MP || APP-HARMONY
+	opener = proxy?.getOpenerEventChannel?.()
+	// #endif
+	taskId = options.id || ''
+	projectId = options.pid || options.project_id || ''
+	getDetail(taskId)
+})
+onUnload(() => {
+	unloaded = true
+	clearTimeout(returnTimer)
+})
+</script>
+
+<style scoped>
+.page-scroll { flex: 1; }
+.edit-page { display: flex; flex-direction: column; align-items: center; padding: 16px; background-color: #f7f8fa; }
+.card { display: flex; flex-direction: column; width: 100%; padding: 24px 20px; border-radius: 12px; background-color: #ffffff; }
+.field { display: flex; flex-direction: column; margin-bottom: 18px; }
+.label { margin-bottom: 6px; color: #2c3e50; font-size: 14px; }
+.input-box { display: flex; flex-direction: row; align-items: center; border: 1px solid #dfe6e3; border-radius: 6px; padding: 0 10px; }
+.title-input { flex: 1; height: 40px; font-size: 14px; color: #2c3e50; }
+.clear { padding: 6px; color: #557566; font-size: 13px; }
+.description { width: 100%; height: 100px; padding: 10px; border: 1px solid #dfe6e3; border-radius: 6px; color: #2c3e50; font-size: 14px; }
+.actions { display: flex; flex-direction: row; justify-content: center; margin-top: 24px; }
+.action { flex: 1; max-width: 220px; margin: 0 6px; font-size: 15px; }
+.primary { background-color: #42b983; color: #ffffff; }
+/* #ifdef WEB */
+.edit-page { min-height: 100vh; box-sizing: border-box; }
+.card { max-width: 1200px; box-sizing: border-box; }
+.description { box-sizing: border-box; }
+@media (min-width: 800px) {
+	.edit-page { padding: 32px; }
+	.card { padding: 32px 40px; }
+	.field { flex-direction: row; align-items: flex-start; }
+	.label { width: 75px; padding-top: 8px; }
+	.input-box, .description { flex: 1; }
+}
+/* #endif */
+</style>

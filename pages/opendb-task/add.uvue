@@ -1,0 +1,289 @@
+<!-- 新建任务：/pages/opendb-task/add?project_id={projectId}&group_id={groupId} -->
+<template>
+	<!-- #ifdef APP -->
+	<scroll-view class="page-scroll" direction="vertical">
+	<!-- #endif -->
+	<view class="task-add-page">
+		<view class="container">
+			<view class="card">
+				<text class="card-heading">任务信息</text>
+				<view class="card-body">
+					<view class="form-row">
+						<text class="label">任务标题 *</text>
+						<view class="input-box">
+							<input v-model="formData.title" class="title-input" name="title" placeholder="输入任务标题" :maxlength="140" />
+							<text v-if="formData.title" class="clear" @tap="formData.title = ''">清除</text>
+						</view>
+					</view>
+					<view class="form-row">
+						<text class="label">任务描述</text>
+						<textarea v-model="formData.content" class="description" name="content" placeholder="输入任务详细描述（选填）" />
+					</view>
+					<view class="settings">
+						<view class="setting">
+							<text class="label">任务分组</text>
+							<picker mode="selector" :range="groupOptions" range-key="text" :value="groupIndex" @change="formData.group_id = groupOptions[$event.detail.value].value">
+								<text class="picker-value">{{ groupOptions[groupIndex].text }}</text>
+							</picker>
+						</view>
+						<view class="setting">
+							<text class="label">负责人</text>
+							<picker mode="selector" :range="memberOptions" range-key="text" :value="memberIndex" @change="formData.assignee = memberOptions[$event.detail.value].value">
+								<text class="picker-value">{{ memberOptions[memberIndex].text }}</text>
+							</picker>
+						</view>
+						<view class="setting">
+							<text class="label">截止日期</text>
+							<picker mode="date" :value="date" :start="startDate" :end="endDate" @change="changeDate">
+								<text class="picker-value">{{ date || '选择日期（选填）' }}</text>
+							</picker>
+						</view>
+						<view class="setting">
+							<text class="label">优先级</text>
+							<picker mode="selector" :range="priorityOptions" range-key="text" :value="formData.priority" @change="formData.priority = priorityOptions[$event.detail.value].value">
+								<text class="picker-value">{{ priorityOptions[formData.priority].text }}</text>
+							</picker>
+						</view>
+					</view>
+				</view>
+			</view>
+			<view class="card">
+				<view class="attachment-heading">
+					<text class="heading-text">附件</text>
+					<text v-if="attachments.length" class="badge">{{ attachments.length }}</text>
+				</view>
+				<view class="card-body">
+					<text v-if="!attachments.length" class="empty">暂无附件</text>
+					<view v-if="imageAttachments.length" class="thumbnails">
+						<view v-for="item in imageAttachments" :key="item.fileID" class="thumbnail" @tap="previewImage(item)">
+							<image class="image" :src="item.url" mode="aspectFill" />
+							<text class="remove-image" @tap.stop="deleteAttachment(item)">删除</text>
+						</view>
+					</view>
+					<view v-for="item in nonImageAttachments" :key="item.fileID" class="attachment-row">
+						<text class="attachment-name">{{ item.name }}</text>
+						<text class="remove-file" @tap="deleteAttachment(item)">删除</text>
+					</view>
+					<button class="upload" :disabled="uploading || submitting" @tap="uploadAttachment">{{ uploading ? '上传中 ' + progress + '%' : uploadLabel }}</button>
+				</view>
+			</view>
+			<view class="actions">
+				<button class="action" :disabled="submitting" @tap="cancel">取消</button>
+				<button class="action primary" :disabled="uploading || submitting" :loading="submitting" @tap="submit">创建任务</button>
+			</view>
+		</view>
+	</view>
+	<!-- #ifdef APP -->
+	</scroll-view>
+	<!-- #endif -->
+</template>
+
+<script setup>
+import { priorityOptions } from '@/js_sdk/validator/opendb-task.js'
+import { formatDate } from '@/utils/date.js'
+
+const db = uniCloud.databaseForJQL()
+// #ifdef WEB || MP || APP-HARMONY
+const proxy = getCurrentInstance()?.proxy
+// #endif
+const formData = reactive({ project_id: '', group_id: '', title: '', content: '', assignee: '', priority: 1 })
+const date = ref('')
+const today = new Date()
+const startDate = formatDate(new Date(today.getFullYear() - 3, today.getMonth(), today.getDate()))
+const endDate = formatDate(new Date(today.getFullYear() + 10, today.getMonth(), today.getDate()))
+const groupOptions = ref([{ value: '', text: '选择分组（选填）' }])
+const memberOptions = ref([{ value: '', text: '选择负责人（选填）' }])
+const groupIndex = computed(() => Math.max(0, groupOptions.value.findIndex(item => item.value === formData.group_id)))
+const memberIndex = computed(() => Math.max(0, memberOptions.value.findIndex(item => item.value === formData.assignee)))
+const attachments = ref([])
+const isImage = item => /^(jpg|jpeg|png|gif|webp|bmp|svg)$/i.test(item.extname)
+const imageAttachments = computed(() => attachments.value.filter(isImage))
+const nonImageAttachments = computed(() => attachments.value.filter(item => !isImage(item)))
+const submitting = ref(false)
+const uploading = ref(false)
+const progress = ref(0)
+let uploadLabel = '上传附件'
+// #ifdef MP-ALIPAY
+uploadLabel = '上传图片附件'
+// #endif
+let confirmingRemoval = false
+let unloaded = false
+let returnTimer = null
+let opener = null
+
+async function loadGroupsAndMembers(projectId) {
+	if (!projectId) return
+	try {
+		const [groups, projects] = await Promise.all([
+			db.collection('task-group').where({ project_id: projectId }).field('_id,name').orderBy('order asc').get(),
+			db.collection('opendb-projects').doc(projectId).field('members,managers').get()
+		])
+		groupOptions.value.push(...groups.data.map(group => ({ value: group._id, text: group.name })))
+		const project = projects.data[0]
+		const ids = [...new Set([...(project?.members || []), ...(project?.managers || [])])]
+		if (ids.length) {
+			const { data } = await db.collection('uni-id-users').where({ _id: db.command.in(ids) }).field('_id,nickname').get()
+			memberOptions.value.push(...data.map(user => ({ value: user._id, text: user.nickname || '未命名用户' })))
+		}
+	} catch (error) {
+		if (!unloaded) uni.showToast({ title: error.errMsg || error.message || '数据加载失败', icon: 'none' })
+	}
+}
+
+function previewImage(item) {
+	uni.previewImage({ current: item.url, urls: imageAttachments.value.map(file => file.url) })
+}
+
+function changeDate(event) {
+	date.value = event.detail.value.replace(/\//g, '-')
+}
+
+async function deleteAttachment(item) {
+	if (confirmingRemoval || submitting.value) return
+	confirmingRemoval = true
+	try {
+		const { confirm } = await uni.showModal({ title: '删除确认', content: '确认删除此附件吗？', confirmColor: '#e74c3c' })
+		if (!confirm || unloaded) return
+		attachments.value = attachments.value.filter(file => file.fileID !== item.fileID)
+		uni.showToast({ title: '已删除', icon: 'success' })
+	} catch (error) {
+		if (!unloaded) uni.showToast({ title: error.errMsg || error.message || '删除失败', icon: 'none' })
+	} finally {
+		confirmingRemoval = false
+	}
+}
+
+async function uploadAttachment() {
+	if (uploading.value || submitting.value) return
+	uploading.value = true
+	progress.value = 0
+	try {
+		let selection
+		// #ifndef MP-ALIPAY
+		selection = await uni.chooseFile({ type: 'all', count: 1 })
+		// #endif
+		// #ifdef MP-ALIPAY
+		selection = await uni.chooseImage({ count: 1 })
+		// #endif
+		if (unloaded) return
+		const file = selection.tempFiles?.[0]
+		const path = file?.path || selection.tempFilePaths?.[0]
+		if (!path) throw new Error('未取得附件路径')
+		const name = file?.name || path.split('/').pop()
+		const dot = name.lastIndexOf('.')
+		const extname = dot < 0 ? '' : name.slice(dot + 1).toLowerCase()
+		const stem = (dot < 0 ? name : name.slice(0, dot)).replace(/[\s/\\?<>:*|"]/g, '_')
+		const { fileID } = await uniCloud.uploadFile({
+			filePath: path,
+			cloudPath: `${stem}_${Date.now()}_0${dot < 0 ? '' : name.slice(dot)}`,
+			onUploadProgress: ({ loaded, total }) => { if (total > 0) progress.value = Math.round(100 * loaded / total) }
+		})
+		let url = fileID
+		if (fileID.startsWith('cloud://')) {
+			const { fileList } = await uniCloud.getTempFileURL({ fileList: [fileID] })
+			url = fileList[0].tempFileURL
+		}
+		if (!unloaded) attachments.value.push({ extname, name, path, size: file?.size || 0, fileID, url })
+	} catch (error) {
+		const message = error.errMsg || error.message || '附件上传失败'
+		if (!unloaded && error.errCode !== 1101001 && !/cancel|取消/i.test(message)) uni.showToast({ title: message, icon: 'none' })
+	} finally {
+		uploading.value = false
+	}
+}
+
+function cancel() {
+	if (!submitting.value) uni.navigateBack()
+}
+
+async function submit() {
+	if (submitting.value || uploading.value || confirmingRemoval) return
+	const title = formData.title.trim()
+	if (!formData.project_id || title.length < 3) {
+		uni.showToast({ title: !formData.project_id ? '缺少项目 ID' : '任务标题至少需要 3 个字符', icon: 'none' })
+		return
+	}
+	const value = { project_id: formData.project_id, group_id: formData.group_id, title, content: formData.content.trimEnd(), priority: formData.priority }
+	if (formData.assignee) value.assignee = formData.assignee
+	if (date.value) value.deadline = new Date(date.value).getTime()
+	if (attachments.value.length) value.attachments = attachments.value.map(file => ({ ...file }))
+	submitting.value = true
+	try {
+		await db.collection('opendb-task').add(value)
+	} catch (error) {
+		submitting.value = false
+		if (!unloaded) uni.showModal({ content: error.errMsg || error.message || '请求服务失败', showCancel: false })
+		return
+	}
+	if (opener) opener.emit('refreshData')
+	else uni.$emit('refreshData', { projectId: formData.project_id })
+	if (unloaded) return
+	uni.showToast({ title: '新增成功', icon: 'success' })
+	returnTimer = setTimeout(() => uni.navigateBack({
+		fail: () => uni.redirectTo({ url: `/pages/opendb-task/list?id=${encodeURIComponent(formData.project_id)}` })
+	}), 500)
+}
+
+onLoad(options => {
+	// #ifdef WEB || MP || APP-HARMONY
+	opener = proxy?.getOpenerEventChannel?.()
+	// #endif
+	formData.project_id = options.project_id || options.pid || ''
+	formData.group_id = options.group_id || ''
+	loadGroupsAndMembers(formData.project_id)
+})
+onUnload(() => {
+	unloaded = true
+	clearTimeout(returnTimer)
+})
+</script>
+
+<style scoped>
+.page-scroll { flex: 1; }
+.task-add-page { display: flex; flex-direction: column; align-items: center; background-color: #f7f8fa; }
+.container { display: flex; flex-direction: column; width: 100%; padding: 16px 16px 40px; }
+.card { display: flex; flex-direction: column; margin-bottom: 16px; background-color: #ffffff; border-radius: 12px; overflow: hidden; }
+.card-heading, .attachment-heading { padding: 16px 20px; background-color: #edf9f2; }
+.card-heading, .heading-text { color: #2c3e50; font-size: 16px; font-weight: 600; }
+.attachment-heading { display: flex; flex-direction: row; align-items: center; justify-content: space-between; }
+.badge { padding: 2px 8px; border-radius: 10px; background-color: #42b983; color: #ffffff; font-size: 12px; }
+.card-body { display: flex; flex-direction: column; padding: 16px 20px; }
+.form-row, .settings, .setting { display: flex; flex-direction: column; }
+.form-row { margin-bottom: 16px; }
+.setting { margin-bottom: 12px; }
+.label { margin-bottom: 6px; font-size: 14px; color: #2c3e50; }
+.input-box, .description, .picker-value { border: 1px solid #dfe6e3; border-radius: 8px; }
+.input-box { display: flex; flex-direction: row; align-items: center; padding: 0 12px; }
+.title-input { flex: 1; height: 42px; font-size: 14px; color: #2c3e50; }
+.clear { padding: 6px; color: #557566; font-size: 13px; }
+.description { height: 120px; width: 100%; padding: 10px 12px; color: #2c3e50; font-size: 14px; }
+.picker-value { padding: 10px 12px; font-size: 14px; color: #53645d; background-color: #f8faf9; }
+.empty { padding: 16px; text-align: center; font-size: 14px; color: #6c757d; }
+.thumbnails { display: flex; flex-direction: row; flex-wrap: wrap; }
+.thumbnail { position: relative; margin: 0 10px 10px 0; }
+.image { width: 100px; height: 100px; border-radius: 8px; }
+.remove-image { position: absolute; top: 4px; right: 4px; padding: 3px 6px; background-color: #b5382f; color: #ffffff; border-radius: 6px; font-size: 12px; }
+.attachment-row { display: flex; flex-direction: row; align-items: center; padding: 10px; margin-bottom: 8px; border-radius: 8px; background-color: #f8f9fa; }
+.attachment-name { flex: 1; color: #2c3e50; font-size: 14px; }
+.remove-file { padding: 4px 8px; color: #ba382f; font-size: 13px; }
+.upload { width: 100%; background-color: #edf9f2; color: #28724e; font-size: 14px; }
+.actions { display: flex; flex-direction: row; justify-content: center; margin-top: 12px; }
+.action { flex: 1; margin: 0 6px; max-width: 220px; font-size: 15px; }
+.primary { background-color: #42b983; color: #ffffff; }
+/* #ifdef WEB */
+.task-add-page { min-height: 100vh; }
+.container { max-width: 900px; box-sizing: border-box; }
+.description { box-sizing: border-box; }
+@media (min-width: 768px) {
+	.container { padding: 24px 32px 48px; }
+	.card-body { padding: 24px; }
+	.settings { flex-direction: row; flex-wrap: wrap; justify-content: space-between; }
+	.setting { width: 48%; }
+}
+@media (min-width: 800px) {
+	.form-row { flex-direction: row; align-items: flex-start; }
+	.label { min-width: 90px; }
+	.input-box, .description { flex: 1; }
+}
+/* #endif */
+</style>
