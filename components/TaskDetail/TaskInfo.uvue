@@ -1,0 +1,164 @@
+<template>
+	<view class="task-info">
+		<!-- 负责人 -->
+		<view class="info-item">
+			<uni-icons type="contact" size="18" color="#42b983" class="info-icon"></uni-icons>
+			<uni-data-select
+				class="info-select"
+				:clear-icon="false"
+				v-model="localAssignee"
+				:localdata="members"
+				@change="emit('assignee-change', $event)">
+			</uni-data-select>
+		</view>
+
+		<!-- 截止日期 -->
+		<view class="info-item">
+			<uni-icons type="calendar" size="18" color="#42b983" class="info-icon"></uni-icons>
+			<view>
+				<uni-datetime-picker
+					type="date"
+					v-model="localDeadline"
+					@change="emit('deadline-change', $event)">
+					<text class="info-date" :class="{ 'deadline-overdue': deadlineOverdue }">{{ localDeadline || '设置截止日期' }}</text>
+				</uni-datetime-picker>
+			</view>
+		</view>
+
+		<!-- 优先级 -->
+		<view class="info-item">
+			<uni-icons type="tune" size="18" color="#42b983" class="info-icon"></uni-icons>
+			<picker
+				:value="task.priority"
+				:range="priorityOptions"
+				@change="handlePriorityChange">
+				<text class="info-picker">{{ priorityOptions[task.priority] }}</text>
+			</picker>
+		</view>
+	</view>
+</template>
+
+<script setup>
+import { isOverdue, PRIORITY_OPTIONS } from '@/utils/task.js'
+
+const props = defineProps({
+	task: {
+		type: Object,
+		required: true
+	},
+	members: {
+		type: Array,
+		default: () => []
+	}
+})
+const emit = defineEmits(['assignee-change', 'deadline-change', 'priority-change'])
+const localAssignee = ref(props.task.assignee || '')
+const localDeadline = ref(props.task.deadline || '')
+const priorityOptions = PRIORITY_OPTIONS.map(p => p.text)
+const deadlineOverdue = computed(() => isOverdue(localDeadline.value))
+
+watch(() => props.task.assignee, val => { localAssignee.value = val || '' })
+watch(() => props.task.deadline, val => { localDeadline.value = val || '' })
+
+function handlePriorityChange(e) {
+	emit('priority-change', parseInt(e.detail.value))
+}
+</script>
+
+<style scoped>
+.task-info {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	margin-top: 16px;
+	gap: 16px;
+	padding: 16px;
+	background-color: #f7f8fa;
+	border-radius: 8px;
+	border: 1px solid #e9ecef;
+}
+
+.info-item {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	background-color: #ffffff;
+	border-radius: 6px;
+	transition: all 0.25s ease;
+	border: 1px solid transparent;
+}
+
+.info-icon {
+	color: #42b983;
+	font-size: 18px;
+}
+
+.info-select {
+	min-width: 150px;
+	border: none;
+}
+
+.info-picker {
+	padding: 6px 12px;
+	cursor: pointer;
+	color: #2c3e50;
+	font-weight: 500;
+	border-radius: 4px;
+	transition: all 0.25s ease;
+}
+
+.info-date {
+	color: #42b983;
+	font-weight: 500;
+}
+
+.deadline-overdue {
+	color: #e74c3c;
+	font-weight: 600;
+}
+
+/* #ifdef WEB */
+@media (hover: hover) and (pointer: fine) {
+	.info-item:hover {
+		border-color: #42b983;
+		box-shadow: 0 2px 8px rgba(66, 185, 131, 0.1);
+	}
+
+	.info-picker:hover {
+		background-color: #e6fcf5;
+		color: #42b983;
+	}
+}
+/* #endif */
+</style>
+
+<!-- 无 scoped 样式块，用于覆盖子组件样式（兼容小程序） -->
+<style lang="scss">
+/* #ifndef APP */
+/* TaskInfo - uni-datetime-picker 样式优化 */
+.task-info .uni-date-x {
+	color: #42b983;
+	font-weight: 500;
+}
+
+.task-info .uni-date-x:hover {
+	color: #359568;
+}
+
+/* TaskInfo - uni-data-select 样式优化 */
+.task-info .uni-stat__select {
+	border-color: transparent;
+}
+
+.task-info .uni-stat__select:hover {
+	border-color: #42b983;
+}
+
+.task-info .uni-stat__select-text {
+	color: #42b983;
+	font-weight: 500;
+}
+/* #endif */
+</style>

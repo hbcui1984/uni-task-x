@@ -1,0 +1,256 @@
+<template>
+	<view class="sub-task-list">
+		<view class="section-header">
+			<text class="section-title">子任务</text>
+			<text class="task-count">({{ subTasks.length }})</text>
+		</view>
+
+		<!-- 添加子任务输入框 -->
+		<view class="add-subtask">
+			<input
+				class="subtask-input"
+				v-model="newSubTaskTitle"
+				placeholder="添加子任务"
+				@confirm="handleAddSubTask"
+			/>
+			<button
+				class="add-button"
+				:class="{ 'add-button-disabled': !newSubTaskTitle.trim() }"
+				type="primary"
+				size="mini"
+				@click="handleAddSubTask"
+				:disabled="!newSubTaskTitle.trim()">
+				添加
+			</button>
+		</view>
+
+		<!-- 子任务列表 -->
+		<view v-if="subTasks.length > 0" class="subtask-items">
+			<view
+				v-for="item in subTasks"
+				:key="item._id"
+				class="subtask-item">
+				<checkbox-group @change="handleSubTaskStatusChange($event, item)">
+					<label class="subtask-label">
+						<checkbox :checked="item.status == 2" :value="item._id" color="#42b983" />
+						<text class="subtask-title" :class="{ 'subtask-completed': item.status == 2 }">
+							{{ item.title }}
+						</text>
+					</label>
+				</checkbox-group>
+				<view class="subtask-actions">
+					<uni-icons
+						type="trash"
+						size="16"
+						color="#999"
+						@click="handleDeleteSubTask(item)">
+					</uni-icons>
+				</view>
+			</view>
+		</view>
+
+		<!-- 空状态 -->
+		<view v-else class="empty-state">
+			<text class="empty-text">暂无子任务</text>
+		</view>
+	</view>
+</template>
+
+<script setup>
+defineProps({
+	subTasks: {
+		type: Array,
+		default: () => []
+	},
+	taskId: {
+		type: String,
+		required: true
+	}
+})
+const emit = defineEmits(['add', 'status-change', 'delete'])
+const newSubTaskTitle = ref('')
+
+function handleAddSubTask() {
+	const title = newSubTaskTitle.value.trim()
+	if (!title) return
+	emit('add', title)
+	newSubTaskTitle.value = ''
+}
+
+function handleSubTaskStatusChange(e, task) {
+	const status = e.detail.value.length > 0 ? 2 : (task.status === 2 ? 0 : 2)
+	emit('status-change', { task, status })
+}
+
+function handleDeleteSubTask(item) {
+	uni.showModal({
+		title: '确认删除',
+		content: `确定要删除子任务"${item.title}"吗？`,
+		success: (res) => {
+			if (res.confirm) emit('delete', item)
+		}
+	})
+}
+</script>
+
+<style scoped>
+.sub-task-list {
+	margin-top: 24px;
+}
+
+.section-header {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	margin-bottom: 16px;
+	padding-bottom: 12px;
+	border-bottom: 2px solid #e6fcf5;
+}
+
+.section-title {
+	font-weight: 600;
+	font-size: 16px;
+	color: #2c3e50;
+}
+
+.task-count {
+	margin-left: 8px;
+	color: #42b983;
+	font-size: 14px;
+	font-weight: 600;
+	background-color: #e6fcf5;
+	padding: 2px 8px;
+	border-radius: 12px;
+}
+
+.add-subtask {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 16px;
+	padding: 12px;
+	background-color: #f7f8fa;
+	border-radius: 8px;
+	border: 1px solid #e9ecef;
+}
+
+.subtask-input {
+	flex: 1;
+	padding: 10px 14px;
+	border: 1px solid #e9ecef;
+	border-radius: 6px;
+	font-size: 14px;
+	transition: all 0.25s ease;
+	background-color: #ffffff;
+}
+
+.subtask-items {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.subtask-item {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	padding: 12px 16px;
+	background-color: #ffffff;
+	border-radius: 8px;
+	border: 1px solid #e9ecef;
+	transition: all 0.25s ease;
+}
+
+.subtask-label {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	flex: 1;
+	gap: 10px;
+}
+
+.subtask-title {
+	color: #2c3e50;
+	font-weight: 500;
+}
+
+.subtask-completed {
+	text-decoration: line-through;
+	color: #adb5bd;
+	font-weight: 400;
+}
+
+.subtask-actions {
+	cursor: pointer;
+	padding: 4px;
+	border-radius: 4px;
+	transition: all 0.25s ease;
+}
+
+.empty-state {
+	padding: 48px;
+	align-items: center;
+	background-color: #f7f8fa;
+	border-radius: 8px;
+	border: 2px dashed #e9ecef;
+}
+
+.empty-text {
+	color: #adb5bd;
+	font-size: 14px;
+}
+
+.add-button {
+	background-color: #42b983;
+	border-color: #42b983;
+	border-radius: 6px;
+	font-weight: 500;
+	transition: all 0.25s ease;
+}
+
+.add-button-disabled {
+	background-color: #adb5bd;
+	border-color: #adb5bd;
+	opacity: 0.6;
+}
+
+/* #ifdef WEB */
+@media (hover: hover) and (pointer: fine) {
+	.subtask-item:hover {
+		border-color: #42b983;
+		box-shadow: 0 2px 8px rgba(66, 185, 131, 0.1);
+	}
+
+	.subtask-actions:hover {
+		background-color: #fdecea;
+	}
+
+	.add-button:hover {
+		background-color: #359568;
+		box-shadow: 0 4px 14px rgba(66, 185, 131, 0.2);
+	}
+}
+/* #endif */
+
+/* #ifndef APP */
+.subtask-input:focus {
+	outline: none;
+	border-color: #42b983;
+	box-shadow: 0 0 0 3px rgba(66, 185, 131, 0.1);
+}
+/* #endif */
+</style>
+
+<style>
+/* #ifndef APP */
+.sub-task-list checkbox .uni-checkbox-input {
+	border-color: #42b983;
+}
+.sub-task-list checkbox .uni-checkbox-input.uni-checkbox-input-checked {
+	background-color: #42b983;
+	border-color: #42b983;
+}
+/* #endif */
+</style>

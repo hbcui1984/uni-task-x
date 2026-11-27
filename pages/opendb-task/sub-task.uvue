@@ -8,10 +8,9 @@
  * 路由：/pages/opendb-task/sub-task
 -->
 <template>
+	<view />
 </template>
 
-<script>
+<script setup>
+// 子任务详情复用 detail?id=子任务ID&pid=项目ID，此预留页没有独立业务。
 </script>
-
-<style>
-</style>
