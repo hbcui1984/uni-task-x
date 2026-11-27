@@ -23,85 +23,71 @@
 	</view>
 </template>
 
-<script>
-	export default {
-		name: 'CustomNavBar',
-		props: {
-			// 标题
-			title: {
-				type: String,
-				default: ''
-			},
-			// 副标题
-			subtitle: {
-				type: String,
-				default: ''
-			},
-			// 是否显示返回文字
-			showBackText: {
-				type: Boolean,
-				default: false
-			},
-			// 背景色
-			backgroundColor: {
-				type: String,
-				default: '#ffffff'
-			},
-			// 是否固定在顶部
-			fixed: {
-				type: Boolean,
-				default: false
-			},
-			// 自定义返回地址
-			backUrl: {
-				type: String,
-				default: ''
-			}
-		},
-		data() {
-			return {
-				statusBarHeight: 0,
-				capsuleRightPadding: 0
-			}
-		},
-		mounted() {
-			const systemInfo = uni.getSystemInfoSync()
-			this.statusBarHeight = systemInfo.statusBarHeight || 0
-			// #ifdef MP-WEIXIN
-			try {
-				const menuButton = uni.getMenuButtonBoundingClientRect()
-				this.capsuleRightPadding = systemInfo.windowWidth - menuButton.left + 4
-			} catch(e) {}
-			// #endif
-		},
-		methods: {
-			handleBack() {
-				// 如果指定了自定义返回地址，直接跳转
-				if (this.backUrl) {
-					uni.redirectTo({
-						url: this.backUrl
-					})
-					this.$emit('back')
-					return
-				}
+<script setup>
+	import { onMounted, ref } from 'vue'
 
-				// 判断是否可以返回
-				const pages = getCurrentPages()
-				if (pages.length > 1) {
-					uni.navigateBack({
-						delta: 1
-					})
-				} else {
-					// 如果是第一页，跳转到首页
-					uni.reLaunch({
-						url: '/pages/opendb-projects/list'
-					})
-				}
+	defineOptions({ name: 'CustomNavBar' })
 
-				// 触发自定义返回事件（可选监听）
-				this.$emit('back')
-			}
+	const props = defineProps({
+		// 标题
+		title: {
+			type: String,
+			default: ''
+		},
+		// 副标题
+		subtitle: {
+			type: String,
+			default: ''
+		},
+		// 是否显示返回文字
+		showBackText: {
+			type: Boolean,
+			default: false
+		},
+		// 背景色
+		backgroundColor: {
+			type: String,
+			default: '#ffffff'
+		},
+		// 是否固定在顶部
+		fixed: {
+			type: Boolean,
+			default: false
+		},
+		// 自定义返回地址
+		backUrl: {
+			type: String,
+			default: ''
 		}
+	})
+	const emit = defineEmits(['back'])
+	const statusBarHeight = ref(0)
+	const capsuleRightPadding = ref(0)
+
+	onMounted(() => {
+		const windowInfo = uni.getWindowInfo()
+		statusBarHeight.value = windowInfo.statusBarHeight || 0
+		// #ifdef MP-WEIXIN
+		try {
+			const capsule = uni.getMenuButtonBoundingClientRect()
+			if (capsule && capsule.width > 0 && capsule.left > 0 && capsule.left < windowInfo.windowWidth) {
+				capsuleRightPadding.value = windowInfo.windowWidth - capsule.left + 4
+			}
+		} catch {
+			// 无法获取胶囊尺寸时保留默认右侧间距
+		}
+		// #endif
+	})
+
+	function handleBack() {
+		if (props.backUrl) {
+			uni.redirectTo({ url: props.backUrl })
+		} else if (getCurrentPages().length > 1) {
+			uni.navigateBack({ delta: 1 })
+		} else {
+			uni.reLaunch({ url: '/pages/opendb-projects/list' })
+		}
+		emit('back')
 	}
 </script>
 
@@ -116,6 +102,7 @@
 .navbar-container {
 	height: 44px;
 	display: flex;
+	flex-direction: row;
 	align-items: center;
 	justify-content: space-between;
 	padding: 0 var(--spacing-base);
@@ -125,16 +112,20 @@
 /* ===== 左侧返回按钮 ===== */
 .navbar-left {
 	display: flex;
+	flex-direction: row;
 	align-items: center;
 	min-width: 60px;
 	flex-shrink: 0;
 	cursor: pointer;
+	position: relative;
+	z-index: 1;
 }
 
 .back-button {
 	width: 32px;
 	height: 32px;
 	display: flex;
+	flex-direction: row;
 	align-items: center;
 	justify-content: center;
 	border-radius: var(--radius-full);
@@ -200,11 +191,14 @@
 /* ===== 右侧操作区 ===== */
 .navbar-right {
 	display: flex;
+	flex-direction: row;
 	align-items: center;
 	gap: var(--spacing-sm);
 	min-width: 60px;
 	justify-content: flex-end;
 	flex-shrink: 0;
+	position: relative;
+	z-index: 1;
 }
 
 /* ===== 响应式优化 ===== */
