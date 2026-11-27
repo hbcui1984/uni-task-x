@@ -1,0 +1,74 @@
+<template>
+	<scroll-view direction="vertical" class="page">
+		<view class="card">
+			<view class="field" :class="{ 'wide-field': wide }">
+				<text class="label">项目名称</text>
+				<view class="input-box">
+					<input v-model="name" class="name-input" placeholder="请输入项目名称（2-50字符）" @confirm="submit" />
+					<text v-if="name" class="clear" @click="name = ''">清除</text>
+				</view>
+			</view>
+			<button class="submit-btn" :disabled="submitting" @click="submit">提交</button>
+		</view>
+	</scroll-view>
+</template>
+
+<script setup>
+	import { BREAKPOINTS } from '@/utils/responsive.js'
+
+	const name = ref('')
+	const wide = ref(uni.getWindowInfo().windowWidth >= BREAKPOINTS.TABLET)
+	const submitting = ref(false)
+	let active = true
+	let returnTimer
+
+	async function submit() {
+		if (submitting.value) return
+		const value = name.value.trim()
+		if (value.length < 2 || value.length > 50) {
+			uni.showToast({ title: '项目名称须为2至50个字符', icon: 'none' })
+			return
+		}
+		submitting.value = true
+		uni.showLoading({ title: '提交中...', mask: true })
+		try {
+			// 创建者权限和初始邀请码由原有 action 生成。
+			const db = uniCloud.databaseForJQL()
+			const res = await db.action('add-project').collection('opendb-projects').add({ name: value })
+			uni.$emit('refresh-projects', { id: res.id, change: 'add' })
+			if (active) {
+				uni.hideLoading()
+				uni.showToast({ title: '新增成功', icon: 'none' })
+				returnTimer = setTimeout(() => {
+					if (getCurrentPages().length > 1) uni.navigateBack()
+					else uni.switchTab({ url: '/pages/opendb-projects/list' })
+				}, 500)
+			}
+		} catch (err) {
+			submitting.value = false
+			if (active) {
+				uni.hideLoading()
+				uni.showModal({ content: err.errMsg || err.message || '请求服务失败', showCancel: false })
+			}
+		}
+	}
+
+	onResize(() => { wide.value = uni.getWindowInfo().windowWidth >= BREAKPOINTS.TABLET })
+	onUnload(() => {
+		active = false
+		clearTimeout(returnTimer)
+		if (submitting.value) uni.hideLoading()
+	})
+</script>
+
+<style scoped>
+	.page { flex: 1; background-color: #f7f8fa; }
+	.card { display: flex; flex-direction: column; align-self: center; width: 100%; max-width: 800px; margin: 20px auto; padding: 24px 20px; border-radius: 12px; background-color: #ffffff; }
+	.field { display: flex; flex-direction: column; }
+	.wide-field { flex-direction: row; align-items: center; }
+	.label { width: 90px; margin: 8px 0; font-size: 15px; color: #2c3e50; }
+	.input-box { display: flex; flex-direction: row; align-items: center; flex-grow: 1; padding: 0 10px; border: 1px solid #dce3df; border-radius: 6px; }
+	.name-input { flex: 1; height: 42px; font-size: 15px; color: #2c3e50; }
+	.clear { padding: 8px; font-size: 13px; color: #359568; }
+	.submit-btn { align-self: center; width: 200px; margin: 48px 0 0; border-radius: 6px; background-color: #42b983; color: #ffffff; font-size: 16px; }
+</style>
