@@ -61,7 +61,8 @@
 				"navigationStyle": "custom",
 				// #endif
 				"navigationBarBackgroundColor": "#ffffff",
-				"navigationBarTextStyle": "black"
+				"navigationBarTextStyle": "black",
+				"enablePullDownRefresh": true
 			}
 		}, {
 			"path": "pages/opendb-task/myTask",
