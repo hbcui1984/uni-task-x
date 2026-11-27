@@ -290,6 +290,7 @@
 			}
 		]
 	},
+	// #ifdef WEB
 	"topWindow": {
 		"path": "windows/topWindow",
 		"style": {
@@ -299,6 +300,7 @@
 			"minWidth": 800
 		}
 	},
+	// #endif
 
 	"globalStyle": {
 		"navigationBarTextStyle": "black",

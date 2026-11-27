@@ -1,6 +1,6 @@
 <template>
+	<!-- #ifdef WEB -->
 	<view class="header">
-		<!-- #ifdef H5 -->
 		<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
 			style="position: absolute; width: 0; height: 0">
 			<symbol xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" id="icon-bug">
@@ -9,7 +9,6 @@
 				</path>
 			</symbol>
 		</svg>
-		<!-- #endif -->
 		<view class="navbar" :class="{'navbar-mini':!matchLeftWindow,'popup-menu':popupMenuOpened}">
 			<view class="navbar-left">
 				<view class="logo pointer" @click="linkTo">
@@ -34,14 +33,12 @@
 			</view>
 			<!-- navbar-middle 已移除，顶部导航不再显示页面标题 -->
 			<view class="navbar-right pointer">
-				<!-- #ifdef H5 -->
 				<view v-if="logs.length" @click="showErrorLogs" class="menu-item debug pointer navbar-right-item-gap">
 					<svg class="svg-icon">
 						<use xlink:href="#icon-bug"></use>
 					</svg>
 					<uni-badge class="debug-badge" :text="logs.length" type="error"></uni-badge>
 				</view>
-				<!-- #endif -->
 
 				<view class="" style="position: relative;">
 					<view v-show="userInfo.nickname || userInfo.username || userInfo.mobile || userInfo.email"
@@ -67,167 +64,117 @@
 				</view>
 			</view>
 		</view>
-		<uni-popup ref="errorLogsPopup" type="center">
+		<WebPopup ref="errorLogsPopup" type="center">
 			<view class="modal">
-				<scroll-view class="modal-content" scroll-y="true">
-					<error-log class="error-table" />
+				<scroll-view class="modal-content" direction="vertical">
+					<ErrorLog class="error-table" />
 				</scroll-view>
 			</view>
-		</uni-popup>
+		</WebPopup>
 		<!-- 冗余代码，临时处理 uni-datetime-picker 国际化不生效的问题 -->
-		<!-- #ifdef H5 -->
 		<uni-datetime-picker type="date" v-show="false"></uni-datetime-picker>
-		<!-- #endif -->
 	</view>
+	<!-- #endif -->
 </template>
 
-<script>
-	import {
-		mapState,
-		mapMutations
-	} from 'vuex'
+<script setup>
+	// #ifdef WEB
+	import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+	import store from '@/store/index.js'
+	import { store as uniIdStore, mutations as uniIdMutations } from '@/uni_modules/uni-id-pages/common/store.js'
+	// 保留 Web 弹窗的居中布局和 Esc 关闭行为。
+	import WebPopup from '@/uni_modules/uni-popup/components/uni-popup/uni-popup.vue'
+	import ErrorLog from './components/error-log.uvue'
 
-	import errorLog from '@/windows/components/error-log.vue'
+	const props = defineProps({
+		matchLeftWindow: Boolean,
+		showLeftWindow: Boolean
+	})
 
-	export default {
-		components: {
-			errorLog
-		},
-		props: {
-			navigationBarTitleText: {
-				type: String
-			},
-			matchLeftWindow: {
-				type: Boolean
-			},
-			showLeftWindow: {
-				type: Boolean
-			}
-		},
-		data() {
-			return {
-				logo: '/static/logo.png',
-				themes: [{
-					text: '默认',
-					value: 'default'
-				}, {
-					text: '绿柔',
-					value: 'green'
-				}],
-				popupMenuOpened: false,
-				mpCapsule: 0,
-				currentPath: ''
-			}
-		},
-		computed: {
-			...mapState('app', ['appName', 'routes', 'theme']),
-			...mapState('error', ['logs']),
-			userInfo() {
-				return this.$uniIdPagesStore.store.userInfo
-			},
-			themeIndex() {
-				let i = 0
-				this.themes.forEach((theme, index) => {
-					if (theme.value === this.theme) i = index
-				})
-				return i
-			}
-		},
-		mounted() {
-			// #ifdef MP
-			let menuButtonInfo = uni.getMenuButtonBoundingClientRect()
-			this.mpCapsule = menuButtonInfo.width
-			// #endif
+	const logo = '/static/logo.png'
+	const popupMenuOpened = ref(false)
+	const currentPath = ref('')
+	const errorLogsPopup = ref(null)
+	const appName = computed(() => store.state.app.appName)
+	const logs = computed(() => store.state.error.logs)
+	const userInfo = computed(() => uniIdStore.userInfo)
 
-			// 初始化当前路径
-			this.updateCurrentPath()
+	function showErrorLogs() {
+		popupMenuOpened.value = false
+		errorLogsPopup.value?.open()
+	}
 
-			// 监听路由变化
-			uni.$on('routeChange', this.updateCurrentPath)
-		},
-		beforeDestroy() {
-			uni.$off('routeChange', this.updateCurrentPath)
-		},
-		methods: {
-			...mapMutations('app', ['SET_THEME']),
-			showErrorLogs() {
-				if (this.popupMenuOpened) {
-					this.popupMenuOpened = false
-				}
-				this.$refs.errorLogsPopup.open()
-			},
-			showPasswordPopup() {
-				if (this.popupMenuOpened) {
-					this.popupMenuOpened = false
-				}
-				this.$refs.passwordPopup.open()
-			},
-			logout() {
-				this.popupMenuOpened = false
-				this.$uniIdPagesStore.mutations.logout()
-			},
-			toggleSidebar() {
-				if (!this.showLeftWindow) {
-					uni.showLeftWindow()
-				} else {
-					uni.hideLeftWindow()
-				}
-			},
-			togglePopupMenu() {
-				this.popupMenuOpened = !this.popupMenuOpened
-			},
-			changePassword() {
-				uni.navigateTo({
-					url: '/uni_modules/uni-id-pages/pages/userinfo/change_pwd/change_pwd',
-					complete: () => {
-						this.popupMenuOpened = false
-					}
-				})
-			},
-			linkTo() {
-				uni.reLaunch({
-					url: '/'
-				})
-			},
-			updateCurrentPath() {
-				const pages = getCurrentPages()
-				if (pages.length > 0) {
-					const currentPage = pages[pages.length - 1]
-					this.currentPath = '/' + currentPage.route
-				}
-			},
-			navTo(path) {
-				// TabBar 页面需要使用 switchTab
-				const tabBarPages = [
-					'/pages/opendb-projects/list',
-					'/pages/opendb-task/myTask',
-					'/pages/task-logs/task-logs',
-					'/pages/ucenter/ucenter'
-				]
+	function logout() {
+		popupMenuOpened.value = false
+		uniIdMutations.logout()
+	}
 
-				if (tabBarPages.includes(path)) {
-					uni.switchTab({
-						url: path,
-						complete: () => {
-							this.currentPath = path
-						}
-					})
-				} else {
-					uni.navigateTo({
-						url: path,
-						complete: () => {
-							this.currentPath = path
-						}
-					})
-				}
-			},
-			changeTheme(e) {
-				const index = typeof e === 'object' ? e.detail.value : e
-				const theme = this.themes[index].value || 'default'
-				if (this.theme !== theme) this.SET_THEME(theme)
-			}
+	function toggleSidebar() {
+		if (!props.showLeftWindow) {
+			uni.showLeftWindow()
+		} else {
+			uni.hideLeftWindow()
 		}
 	}
+
+	function togglePopupMenu() {
+		popupMenuOpened.value = !popupMenuOpened.value
+	}
+
+	function changePassword() {
+		uni.navigateTo({
+			url: '/uni_modules/uni-id-pages/pages/userinfo/change_pwd/change_pwd',
+			complete: () => {
+				popupMenuOpened.value = false
+			}
+		})
+	}
+
+	function linkTo() {
+		uni.reLaunch({ url: '/' })
+	}
+
+	function updateCurrentPath() {
+		const pages = getCurrentPages()
+		if (pages.length > 0) {
+			const currentPage = pages[pages.length - 1]
+			currentPath.value = '/' + currentPage.route
+		}
+	}
+
+	function navTo(path) {
+		// TabBar 页面需要使用 switchTab
+		const tabBarPages = [
+			'/pages/opendb-projects/list',
+			'/pages/opendb-task/myTask',
+			'/pages/task-logs/task-logs',
+			'/pages/ucenter/ucenter'
+		]
+		const options = {
+			url: path,
+			complete: () => {
+				currentPath.value = path
+			}
+		}
+
+		if (tabBarPages.includes(path)) {
+			uni.switchTab(options)
+		} else {
+			uni.navigateTo(options)
+		}
+	}
+
+	defineExpose({ themeIndex, changeTheme })
+
+	onMounted(() => {
+		updateCurrentPath()
+		uni.$on('routeChange', updateCurrentPath)
+	})
+
+	onBeforeUnmount(() => {
+		uni.$off('routeChange', updateCurrentPath)
+	})
+	// #endif
 </script>
 
 <style lang="scss">

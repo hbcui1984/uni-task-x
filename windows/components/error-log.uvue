@@ -1,0 +1,111 @@
+<template>
+    <!-- #ifdef WEB -->
+    <view class="uni-table-scroll">
+        <table class="uni-table">
+            <thead>
+                <tr>
+                    <th scope="col">错误信息</th>
+                    <th scope="col">路由</th>
+                    <th scope="col">时间</th>
+                    <th scope="col">搜索</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr v-for="(log, index) in logs" :key="index">
+                    <td>
+                        <text class="err-msg">Error in {{log.info}}: `{{log.err}}`</text>
+                    </td>
+                    <td>
+                        <navigator class="err-route" :url="log.route">{{log.route}}</navigator>
+                    </td>
+                    <td>
+                        <text>{{log.time}}</text>
+                    </td>
+                    <td>
+                        <a v-for="engine in engines" :key="engine.name"
+                            :href="engine.url.replace('ERR_MSG', encodeURIComponent(log.err))"
+                            target="_blank" rel="noopener" class="err-search">{{engine.name}}</a>
+                    </td>
+                </tr>
+                <tr v-if="!logs.length">
+                    <td colspan="4" class="err-empty">没有更多数据</td>
+                </tr>
+            </tbody>
+        </table>
+    </view>
+    <!-- #endif -->
+</template>
+
+<script setup>
+    // #ifdef WEB
+    import { computed } from 'vue'
+    import store from '@/store/index.js'
+
+    const logs = computed(() => store.state.error.logs)
+    const engines = [{
+        name: '百度',
+        url: 'https://www.baidu.com/baidu?wd=ERR_MSG'
+    }, {
+        name: '谷歌',
+        url: 'https://www.google.com/search?q=ERR_MSG'
+    }]
+    // #endif
+</script>
+
+<style>
+    .uni-table-scroll {
+        overflow-x: auto;
+    }
+
+    .uni-table {
+        width: 100%;
+        min-width: 440px;
+        border-collapse: collapse;
+        background-color: #fff;
+        font-size: 14px;
+    }
+
+    .uni-table th,
+    .uni-table td {
+        box-sizing: border-box;
+        border: 1px solid #ebeef5;
+    }
+
+    .uni-table th {
+        padding: 12px 10px;
+        color: #909399;
+        text-align: center;
+    }
+
+    .uni-table th:not(:first-child) {
+        width: 100px;
+    }
+
+    .uni-table td {
+        padding: 8px 10px;
+        color: #606266;
+        line-height: 23px;
+    }
+
+    .uni-table tbody tr:nth-child(even) {
+        background-color: #fafafa;
+    }
+
+    .uni-table tbody tr:hover {
+        background-color: #f5f7fa;
+    }
+
+    .uni-table .err-empty {
+        height: 50px;
+        color: #999;
+        text-align: center;
+    }
+
+    .err-msg {
+        color: #FF0000;
+    }
+
+    .err-search {
+        margin-right: 10px;
+    }
+</style>
