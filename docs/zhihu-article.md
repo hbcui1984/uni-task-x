@@ -1,4 +1,4 @@
-# 开源轻量的团队任务管理系统 uni-task
+# uni-task - 轻量级团队任务管理系统
 
 ## 痛点：团队协作工具太贵了
 
@@ -15,21 +15,31 @@
 
 ## 先看效果
 
-### 项目列表
+### PC端
 
-[截图占位：项目列表页面 - 展示多个项目卡片]
+项目列表:
 
-### 任务看板
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/project-list.png)
 
-[截图占位：任务列表页面 - 展示任务分组和任务卡片]
+任务列表:
 
-### 任务详情
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/task-list.png)
 
-[截图占位：任务详情页面 - 展示任务信息、子任务、附件等]
+支持子任务和评论：
 
-### 多端适配
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/sub-task-list.png)
 
-[截图占位：H5、小程序、App 三端对比展示]
+任务动态自动记录：
+
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/task-log.png)
+
+快捷查看“我的任务“：
+
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/my-task.png)
+
+### 微信小程序
+
+![](https://mp-2da038dd-5cd3-481f-a00b-ddb04ea75ed6.cdn.bspapp.com/uni-task-weixin.jpg)
 
 ---
 
@@ -42,7 +52,7 @@
 - 自由修改和定制
 - 不用担心哪天涨价或停服
 
-**GitHub 地址**：https://github.com/hbcui1984/uni-task.git
+**GitHub 地址**：[https://github.com/hbcui1984/uni-task](https://github.com/hbcui1984/uni-task.git)
 
 ### 2. 成本极低
 
@@ -50,16 +60,16 @@
 
 | 方案 | 10 人团队年费用 |
 |------|----------------|
-| Tower 专业版 | ¥2,388/年 起 |
-| Teambition 企业版 | ¥1,188/年 起 |
-| **uni-task** | **¥0 ~ ¥50/年** |
+| Tower 专业版 | ¥39.9元/人/月 |
+| Teambition 企业版 | ¥399元/人/月|
+| **uni-task** | 按量计费，低于 **1.0元/人/月** |
 
-uni-task 基于 uniCloud 云开发，使用阿里云或腾讯云的 Serverless 服务：
+uni-task 基于 uniCloud 云开发，使用支付宝云/阿里云/腾讯云的 Serverless 服务：
 - **开发测试阶段**：完全免费
 - **小团队日常使用**：基本在免费额度内
 - **即使超出免费额度**：按量付费，一年可能也就几十块钱
 
-> 对比一下：Tower 专业版 10 人团队一年 2388 元，uni-task 可能一年只要一杯奶茶钱。
+> 对比一下：Tower 专业版 10 人团队一年 4788 元，uni-task 可能一年只要一杯奶茶钱。
 
 ### 3. 一套代码，全端运行
 
@@ -97,8 +107,6 @@ uni-task 基于 uniCloud 云开发，使用阿里云或腾讯云的 Serverless �
 - 项目动态实时展示
 - 「我的任务」个人视图
 
-[截图占位：功能特性汇总图]
-
 ### 5. 数据完全自主可控
 
 - 数据存储在**你自己的**云服务空间
@@ -124,41 +132,39 @@ uni-task 基于 uniCloud 云开发，使用阿里云或腾讯云的 Serverless �
 
 ## 快速部署指南
 
-整个部署过程大概 **10 分钟**搞定。
+整个部署过程大概 **3 分钟**搞定。
 
-### Step 1: 准备工作
+### 1. 导入项目
 
-1. 安装 [HBuilderX](https://www.dcloud.io/hbuilderx.html)（DCloud 官方 IDE）
-2. 注册 DCloud 开发者账号
-3. 开通 uniCloud 服务（免费）
+从DCloud插件市场下载，地址：[https://ext.dcloud.net.cn/plugin?id=27219](https://ext.dcloud.net.cn/plugin?id=27219)；
 
-### Step 2: 获取代码
+或者从github上下载源码：
 
 ```bash
 git clone https://github.com/hbcui1984/uni-task.git
-cd uni-task
-npm install
 ```
 
-### Step 3: 配置云服务
+### 2. 关联云服务空间
 
-1. 用 HBuilderX 打开项目
-2. 右键 `uniCloud-aliyun` → 关联云服务空间
-3. 上传云函数和初始化数据库
+1. 右键点击 `uniCloud-alipay` 目录
+2. 选择「关联云服务空间」
+3. 如没有云服务空间，请先创建一个
 
-### Step 4: 运行
+### 3. 上传云函数
 
-```bash
-# H5 版本
-npm run dev:h5
+1. 右键点击 `uniCloud-aliyun/cloudfunctions` 目录
+2. 选择「上传所有云函数、公共模块及 actions」
 
-# 微信小程序
-npm run dev:mp-weixin
-```
+### 4. 初始化数据库
+
+1. 右键点击 `uniCloud-aliyun/database` 目录
+2. 选择「初始化云数据库」
+
+### 5. 运行项目
+
+在 HBuilderX 中直接运行到浏览器/模拟器/真机。
 
 搞定！
-
-[截图占位：HBuilderX 配置步骤示意图]
 
 ---
 
@@ -189,7 +195,7 @@ colors: {
 ### 功能扩展
 
 项目架构清晰，方便二次开发：
-- 云对象在 `uniCloud-aliyun/cloudfunctions/` 目录
+- 云对象在 `uniCloud-alipay/cloudfunctions/` 目录
 - 页面在 `pages/` 目录
 - 组件在 `components/` 目录
 
@@ -231,7 +237,7 @@ uni-task 不是要取代 Tower 这类成熟产品，它们功能更全面，服�
 
 那 uni-task 可能是个不错的选择。
 
-**开源地址**：https://github.com/hbcui1984/uni-task.git
+**开源地址**：[https://github.com/hbcui1984/uni-task](https://github.com/hbcui1984/uni-task.git)
 
 欢迎 Star、Fork、提 Issue 和 PR！
 
@@ -246,9 +252,6 @@ A: 会基本的前端开发即可。如果只是部署使用，跟着文档操�
 
 **Q: uniCloud 收费吗？**
 A: 有免费额度，小团队日常使用基本够了。超出按量计费，价格很便宜。
-
-**Q: 可以部署到自己的服务器吗？**
-A: uni-task 基于 uniCloud，目前需要使用阿里云或腾讯云的云空间。但数据是在你自己的云空间里，完全可控。
 
 **Q: 支持私有化部署吗？**
 A: 支持，但需购买`uni云开发软件版`的商业授权，[详见](https://doc.dcloud.net.cn/uniCloud/software/price.html)。
