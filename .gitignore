@@ -26,6 +26,9 @@ npm-debug.log*
 # Vite 缓存
 .vite/
 
+# 测试覆盖率报告
+coverage/
+
 # 临时文件
 *.tmp
 *.temp

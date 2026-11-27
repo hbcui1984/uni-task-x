@@ -94,6 +94,7 @@
     "sortablejs": "^1.15.3"
   },
   "scripts": {
+    "test:unit": "vitest run --config vitest.config.js",
     "logcat:web": "uni-logcat web",
     "logcat:app-android": "uni-logcat app-android",
     "logcat:app-ios": "uni-logcat app-ios",
@@ -117,6 +118,7 @@
     "test:mp-weixin": "uni-test mp-weixin"
   },
   "devDependencies": {
-    "@dcloudio/hbuilderx-cli": "^1.1.2"
+    "@dcloudio/hbuilderx-cli": "^1.1.2",
+    "vitest": "^3.2.7"
   }
 }
