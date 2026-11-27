@@ -1,0 +1,100 @@
+<template>
+	<view class="task-item-mobile">
+		<checkbox class="mobile-checkbox" :checked="task.status === 2" color="#42b983" @click.stop="emit('finish', task._id)" />
+		<view class="mobile-task-content">
+			<view class="mtask-title-row">
+				<text class="task-title" :class="{ 'task-completed': task.status === 2 }">{{ task.title }}</text>
+				<text v-if="task.status === 1" class="task-in-progress">{{ getStatusText(task.status) }}</text>
+				<view v-if="task.subtaskCount?.total > 0" class="mtask-subtask">
+					<TaskGlyph type="list" :size="11" color="#9ca3af" />
+					<text class="mtask-subtask-text" :class="{ 'subtask-all-done': task.subtaskCount.completed === task.subtaskCount.total }">{{ task.subtaskCount.completed }}/{{ task.subtaskCount.total }}</text>
+				</view>
+			</view>
+			<view v-if="showAssigneeChip || task.deadline || task.priority != null" class="mtask-meta-row">
+				<view v-if="showAssigneeChip" class="mtask-chip">
+					<image v-if="assigneeAvatar" class="mtask-avatar" :src="assigneeAvatar" mode="aspectFill" />
+					<view v-else class="mtask-avatar" :style="{ backgroundColor: getAvatarColor(assigneeName) }">
+						<text class="mtask-initial">{{ assigneeName.trim().slice(0, 1).toUpperCase() }}</text>
+					</view>
+					<text class="mtask-chip-text mtask-assignee-name">{{ assigneeName }}</text>
+				</view>
+				<view v-if="task.deadline" @click.stop>
+					<picker mode="date" :value="deadlineValue" @change="onDeadlineChange">
+						<view class="mtask-chip" :class="{ 'mtask-overdue': overdue }">
+							<TaskGlyph type="calendar" :size="12" :color="overdue ? '#dc2626' : '#6b7280'" />
+							<text class="mtask-chip-text" :class="{ 'mtask-overdue-text': overdue }">{{ formatDeadline(task.deadline) || '设置截止日期' }}</text>
+						</view>
+					</picker>
+				</view>
+				<text v-if="task.priority != null" class="mtask-chip-text mtask-priority" :class="'priority-' + task.priority">{{ getPriorityText(task.priority) }}</text>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+import TaskGlyph from '../TaskList/TaskGlyph.uvue'
+import { formatDeadline, getAvatarColor, getPriorityText, getStatusText, isOverdue } from '@/utils/task.js'
+
+const props = defineProps({
+	task: { type: Object, required: true },
+	members: { type: Array, default: () => [] },
+	showAssignee: { type: Boolean, default: true }
+})
+const emit = defineEmits(['finish', 'save-deadline'])
+
+const user = computed(() => Array.isArray(props.task.assignee) ? props.task.assignee[0] : null)
+const assigneeId = computed(() => user.value?._id || (typeof props.task.assignee === 'string' ? props.task.assignee : ''))
+const member = computed(() => props.members.find(item => item.value === assigneeId.value))
+const assigneeName = computed(() => {
+	const u = user.value
+	if (u) return u.realname || u.real_name || u.nickname || u.username || '未知'
+	return member.value?.realName || member.value?.text || '未知'
+})
+const showAssigneeChip = computed(() => props.showAssignee && !!assigneeId.value)
+const assigneeAvatar = computed(() => user.value?.avatar_file?.url || member.value?.avatar || '')
+const overdue = computed(() => isOverdue(props.task.deadline))
+const deadlineValue = computed(() => {
+	const date = new Date(props.task.deadline)
+	return props.task.deadline && Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : ''
+})
+
+function onDeadlineChange(event) {
+	emit('save-deadline', props.task._id, event.detail.value)
+}
+</script>
+
+<style scoped>
+.task-item-mobile {
+	display: flex;
+	flex-direction: row;
+	align-items: flex-start;
+	width: 100%;
+	padding: 9px 12px;
+	box-sizing: border-box;
+	background-color: #fff;
+	border-bottom: 1px solid #f0f0f0;
+}
+.mobile-checkbox { flex-shrink: 0; margin-top: 3px; margin-right: 8px; transform: scale(0.88); }
+.mobile-task-content { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.mtask-title-row { display: flex; flex-direction: row; align-items: center; }
+.task-title { flex: 1; min-width: 0; lines: 2; text-overflow: ellipsis; font-size: 14px; line-height: 19px; font-weight: 600; color: #1f2937; }
+.task-completed { text-decoration: line-through; color: #9ca3af; }
+.task-in-progress { margin-left: 6px; font-size: 11px; color: #53759a; }
+.mtask-subtask { display: flex; flex-direction: row; align-items: center; margin-left: 6px; padding: 1px 6px; border-radius: 10px; background-color: #f3f4f6; }
+.mtask-subtask-text { margin-left: 3px; font-size: 11px; font-weight: 500; color: #9ca3af; }
+.subtask-all-done { color: #42b983; }
+.mtask-meta-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+.mtask-chip { display: flex; flex-direction: row; align-items: center; min-height: 20px; margin-right: 8px; }
+.mtask-chip-text { font-size: 11px; line-height: 14px; color: #7b8794; margin-left: 3px; }
+.mtask-assignee-name { max-width: 112px; lines: 1; text-overflow: ellipsis; }
+.mtask-avatar { display: flex; flex-direction: row; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 8px; }
+.mtask-initial { font-size: 8px; font-weight: 600; color: #fff; }
+.mtask-overdue { background-color: #fff4f3; padding: 1px 6px; border-radius: 10px; }
+.mtask-overdue-text { color: #dc2626; font-weight: 500; }
+.mtask-priority { margin-left: 0; padding: 0 2px; font-weight: 500; }
+.priority-0 { color: #7b8794; }
+.priority-1 { color: #53759a; }
+.priority-2 { color: #a06a16; }
+.priority-3 { color: #b85450; }
+</style>

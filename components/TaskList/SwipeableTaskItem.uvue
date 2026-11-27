@@ -1,0 +1,145 @@
+<template>
+	<view class="swipeable-item">
+		<view class="swipe-actions" :style="{ width: actionsWidth + 'px' }">
+			<view class="swipe-action swipe-complete" @click.stop="action('finish')">
+				<TaskGlyph type="checkmarkempty" :size="20" color="#fff" /><text class="swipe-label">完成</text>
+			</view>
+			<view class="swipe-action swipe-edit" @click.stop="action('edit')">
+				<TaskGlyph type="compose" :size="20" color="#fff" /><text class="swipe-label">编辑</text>
+			</view>
+			<view class="swipe-action swipe-delete" @click.stop="action('delete')">
+				<TaskGlyph type="trash" :size="20" color="#fff" /><text class="swipe-label">删除</text>
+			</view>
+		</view>
+		<view class="swipe-content" :class="{ 'swipe-settled': !tracking }" :style="{ transform: 'translateX(' + offsetX + 'px)' }"
+			@touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd" @touchcancel="onTouchCancel" @click.stop="handleClick">
+			<slot>
+				<view class="task-item-default">
+					<checkbox :checked="task.status === 2" color="#42b983" @click.stop="action('finish')" />
+					<view class="task-info">
+						<text class="task-title" :class="{ 'task-completed': task.status === 2 }">{{ task.title }}</text>
+						<view class="task-meta">
+							<text v-if="task.deadline" class="deadline" :class="{ 'overdue': overdue }">{{ formatDateCN(task.deadline) }}</text>
+							<text class="priority-tag" :class="'priority-' + (task.priority || 0)">{{ getPriorityText(task.priority) }}</text>
+							<text v-if="task.status === 1" class="in-progress">{{ getStatusText(task.status) }}</text>
+						</view>
+					</view>
+				</view>
+			</slot>
+			<!-- 展开时点击内容只收起，不能穿透到插槽内的复选框或日期控件。 -->
+			<view v-if="offsetX !== 0" class="swipe-cover" />
+		</view>
+	</view>
+</template>
+
+<script setup>
+import TaskGlyph from './TaskGlyph.uvue'
+import { getPriorityText, getStatusText } from '@/utils/task.js'
+import { formatDateCN } from '@/utils/date.js'
+import { BREAKPOINTS } from '@/utils/responsive.js'
+
+const props = defineProps({ task: { type: Object, required: true }, threshold: { type: Number, default: 60 } })
+const emit = defineEmits(['click', 'finish', 'edit', 'delete'])
+const actionsWidth = 180
+const offsetX = ref(0)
+const tracking = ref(false)
+const overdue = computed(() => !!props.task.deadline && new Date(props.task.deadline).getTime() < Date.now())
+let startX = 0
+let startY = 0
+let startOffset = 0
+let axis = ''
+let moved = false
+
+function resetSwipe() {
+	offsetX.value = 0
+	tracking.value = false
+	axis = ''
+	moved = false
+}
+
+function onTouchStart(event) {
+	// #ifdef WEB
+	if (uni.getWindowInfo().windowWidth >= BREAKPOINTS.MOBILE) return
+	// #endif
+	const point = event.touches[0]
+	if (!point || event.touches.length !== 1) return
+	startX = point.clientX
+	startY = point.clientY
+	startOffset = offsetX.value
+	axis = ''
+	moved = false
+	tracking.value = true
+}
+
+function onTouchMove(event) {
+	if (!tracking.value || !event.touches[0]) return
+	const dx = event.touches[0].clientX - startX
+	const dy = event.touches[0].clientY - startY
+	if (!axis) {
+		if (Math.max(Math.abs(dx), Math.abs(dy)) < 6) return
+		axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'
+		moved = true
+	}
+	if (axis === 'x') offsetX.value = Math.max(-actionsWidth, Math.min(0, startOffset + dx))
+}
+
+function onTouchEnd() {
+	if (!tracking.value) return
+	tracking.value = false
+	if (axis !== 'x') return
+	const delta = offsetX.value - startOffset
+	if (Math.abs(delta) > props.threshold) offsetX.value = delta < 0 ? -actionsWidth : 0
+	else offsetX.value = startOffset
+}
+
+function onTouchCancel() {
+	if (!tracking.value) return
+	tracking.value = false
+	offsetX.value = startOffset
+	moved = true
+}
+
+function handleClick() {
+	if (moved) { moved = false; return }
+	if (offsetX.value !== 0) { resetSwipe(); return }
+	emit('click', props.task)
+}
+
+function action(name) {
+	resetSwipe()
+	emit(name, props.task._id)
+}
+
+watch(() => props.task._id, resetSwipe)
+defineExpose({ resetSwipe })
+</script>
+
+<style lang="scss" scoped>
+@import '@/common/_priority.scss';
+.swipeable-item { position: relative; flex-direction: column; overflow: hidden; background-color: #fff; }
+.swipe-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; flex-direction: row; align-items: stretch; }
+.swipe-action { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 60px; }
+.swipe-label { margin-top: 4px; font-size: 12px; color: #fff; }
+.swipe-complete { background-color: #42b983; }
+.swipe-edit { background-color: #6c757d; }
+.swipe-delete { background-color: #e74c3c; }
+.swipe-content { position: relative; flex-direction: column; background-color: #fff; }
+.swipe-settled { transition: transform 0.2s ease; }
+.swipe-cover { position: absolute; left: 0; top: 0; bottom: 0; right: 0; }
+/* #ifdef WEB */
+.swipe-content { touch-action: pan-y; }
+/* #endif */
+.task-item-default { display: flex; flex-direction: row; align-items: center; padding: 14px 16px; }
+.task-info { flex: 1; flex-direction: column; min-width: 0; margin-left: 12px; }
+.task-title { font-size: 14px; color: #2c3e50; font-weight: 500; line-height: 20px; lines: 1; text-overflow: ellipsis; }
+.task-completed { color: #9ca3af; text-decoration: line-through; }
+.task-meta { display: flex; flex-direction: row; align-items: center; margin-top: 6px; }
+.deadline { font-size: 12px; color: #6c757d; padding: 2px 8px; background-color: #f7f8fa; border-radius: 4px; margin-right: 8px; }
+.overdue { color: #e74c3c; background-color: #fdecea; }
+.priority-tag { font-size: 11px; font-weight: 500; }
+.priority-0 { color: $priority-0-color; }
+.priority-1 { color: $priority-1-color; }
+.priority-2 { color: $priority-2-color; }
+.priority-3 { color: $priority-3-color; }
+.in-progress { font-size: 11px; color: #53759a; margin-left: 8px; }
+</style>

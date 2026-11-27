@@ -1,0 +1,198 @@
+<template>
+	<view v-if="editor && !editor.loading && !editor.nativeDate" class="editor-mask" @click="closeEditor">
+		<view class="editor-panel" :class="{ 'priority-panel': editor.type === 'priority' }" @click.stop>
+			<view class="editor-header"><text class="editor-title">{{ titles[editor.type] }}</text></view>
+			<view v-if="editor.type === 'priority'" class="priority-options">
+				<view v-for="option in PRIORITY_OPTIONS" :key="option.value" class="priority-option"
+					:class="{ 'selected-option': editor.priority === option.value }" @click="selectPriority(option.value)">
+					<text class="priority-tag" :class="'priority-' + option.value">{{ option.text }}</text>
+					<TaskGlyph v-if="editor.priority === option.value" type="checkmarkempty" :size="18" color="#42b983" />
+				</view>
+			</view>
+			<view v-else-if="editor.type === 'deadline'" class="deadline-content">
+				<picker mode="date" :value="editor.date" @change="editor.date = $event.detail.value">
+					<view class="deadline-picker">
+						<text class="deadline-value" :class="{ 'date-placeholder': !editor.date }">{{ editor.date || '请选择截止日期' }}</text>
+						<TaskGlyph type="calendar" :size="18" color="#42b983" />
+					</view>
+				</picker>
+			</view>
+			<list-view v-else direction="vertical" :style="{ height: Math.min((editor.members.length + 1) * 52, 300) + 'px' }">
+				<list-item>
+					<view class="assignee-option" :class="{ 'selected-option': !editor.assignee }" @click="selectAssignee('')">
+						<view class="member-avatar empty-avatar"><TaskGlyph type="person" color="#999" /></view>
+						<text class="member-name">不指定</text>
+						<TaskGlyph v-if="!editor.assignee" type="checkmarkempty" :size="18" color="#42b983" />
+					</view>
+				</list-item>
+				<list-item v-for="member in editor.members" :key="member.value">
+					<view class="assignee-option" :class="{ 'selected-option': editor.assignee === member.value }" @click="selectAssignee(member.value)">
+						<image v-if="member.avatar" class="member-avatar" :src="member.avatar" mode="aspectFill" />
+						<view v-else class="member-avatar" :style="{ backgroundColor: getAvatarColor(member.text) }">
+							<text class="avatar-initial">{{ member.text?.slice(0, 1) }}</text>
+						</view>
+						<text class="member-name">{{ member.text }}</text>
+						<TaskGlyph v-if="editor.assignee === member.value" type="checkmarkempty" :size="18" color="#42b983" />
+					</view>
+				</list-item>
+			</list-view>
+			<view class="editor-footer">
+				<template v-if="editor.type === 'deadline'">
+					<button class="editor-button" :disabled="editor.saving" @click="clearDeadline">清除日期</button>
+					<button class="editor-button primary-button" :disabled="editor.saving" @click="saveDeadline(editor.date)">确定</button>
+				</template>
+				<button v-else class="editor-button" @click="closeEditor">取消</button>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+import TaskGlyph from '../TaskList/TaskGlyph.uvue'
+import { getAvatarColor, PRIORITY_OPTIONS } from '@/utils/task.js'
+import { formatDate } from '@/utils/date.js'
+// #ifdef WEB
+import { BREAKPOINTS } from '@/utils/responsive.js'
+import { openWebDatePicker } from './webDatePicker.js'
+// #endif
+
+const emit = defineEmits(['update'])
+const editor = ref(null)
+const titles = { priority: '选择优先级', deadline: '设置截止日期', assignee: '选择负责人' }
+let closeDateInput = null
+
+function closeEditor() {
+	if (closeDateInput) closeDateInput()
+	closeDateInput = null
+	editor.value = null
+}
+
+function closePriorityPopup() { if (editor.value?.type === 'priority') closeEditor() }
+function closeDeadlinePopup() { if (editor.value?.type === 'deadline') closeEditor() }
+function closeAssigneePopup() { if (editor.value?.type === 'assignee') closeEditor() }
+
+async function save(value, title, extra = {}) {
+	const current = editor.value
+	if (!current || current.saving) return false
+	const { taskId, type } = current
+	current.saving = true
+	try {
+		await uniCloud.databaseForJQL().collection('opendb-task').doc(taskId).update({ [type]: value })
+		// 保存期间可能已打开另一个任务，只关闭发起本次写入的弹窗。
+		if (editor.value === current) closeEditor()
+		uni.showToast({ title, icon: type === 'assignee' ? 'none' : 'success' })
+		emit('update', { type, taskId, value, ...extra })
+		return true
+	} catch (error) {
+		console.error('更新任务失败', error)
+		uni.showToast({ title: '更新失败', icon: 'none' })
+		return false
+	} finally {
+		current.saving = false
+	}
+}
+
+function openPriorityEditor(task) {
+	closeEditor()
+	editor.value = { type: 'priority', taskId: task._id, priority: task.priority ?? 1, saving: false }
+}
+
+function selectPriority(value) {
+	if (value === editor.value.priority) { closePriorityPopup(); return }
+	return save(value, '优先级已更新')
+}
+
+function saveDeadline(value) {
+	const deadline = value ? new Date(value).getTime() : null
+	return save(deadline, deadline ? '截止日期已更新' : '截止日期已清除')
+}
+
+function clearDeadline() {
+	editor.value.date = ''
+	return saveDeadline('')
+}
+
+function openPCDatePicker(currentDeadline, position) {
+	// #ifdef WEB
+	if (editor.value?.type !== 'deadline') return
+	if (closeDateInput) closeDateInput()
+	const current = editor.value
+	current.nativeDate = true
+	const value = currentDeadline ? new Date(currentDeadline).toISOString().slice(0, 10) : ''
+	closeDateInput = openWebDatePicker(value, position, date => {
+		if (editor.value === current) saveDeadline(date)
+	})
+	// #endif
+}
+
+function openDeadlineEditor(task, position) {
+	closeEditor()
+	editor.value = { type: 'deadline', taskId: task._id, date: formatDate(task.deadline), nativeDate: false, saving: false }
+	// #ifdef WEB
+	if (uni.getWindowInfo().windowWidth >= BREAKPOINTS.MOBILE) openPCDatePicker(task.deadline, position)
+	// #endif
+}
+
+async function openAssigneeEditor(task, members) {
+	closeEditor()
+	const assignee = Array.isArray(task.assignee) ? task.assignee[0]?._id : task.assignee
+	editor.value = { type: 'assignee', taskId: task._id, assignee: assignee || '', members: members || [], loading: false, saving: false }
+	const current = editor.value
+	if (current.members.length) return
+	const projectId = Array.isArray(task.project_id) ? task.project_id[0]?._id : task.project_id
+	if (!projectId) {
+		closeAssigneePopup()
+		uni.showToast({ title: '无法获取成员列表', icon: 'none' })
+		return
+	}
+	current.loading = true
+	try {
+		const users = await uniCloud.importObject('project-co').getMembersList(projectId)
+		current.members = users.map(user => ({ value: user._id, text: user.nickname, avatar: user.avatar }))
+	} catch (error) {
+		console.error('加载项目成员失败', error)
+	} finally {
+		current.loading = false
+	}
+}
+
+function selectAssignee(value) {
+	const { assignee: oldAssignee, members } = editor.value
+	if (value === oldAssignee) { closeAssigneePopup(); return }
+	const oldMemberInfo = members.find(member => member.value === oldAssignee) || null
+	const memberInfo = members.find(member => member.value === value) || null
+	return save(value, `负责人: ${oldMemberInfo?.text || '无'} → ${memberInfo?.text || '无'}`, { oldAssignee, oldMemberInfo, memberInfo })
+}
+
+onBeforeUnmount(closeEditor)
+defineExpose({ openPriorityEditor, closePriorityPopup, openDeadlineEditor, closeDeadlinePopup, openPCDatePicker, openAssigneeEditor, closeAssigneePopup })
+</script>
+
+<style lang="scss" scoped>
+@import '@/common/_priority.scss';
+.editor-mask { position: fixed; top: 0; bottom: 0; left: 0; right: 0; z-index: 1001; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: rgba(0, 0, 0, 0.4); }
+.editor-panel { display: flex; flex-direction: column; width: 300px; max-width: 92%; background-color: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); }
+.priority-panel { width: 280px; }
+.editor-header { padding: 16px; align-items: center; border-bottom: 1px solid #f1f3f5; }
+.editor-title { font-size: 16px; font-weight: 600; color: #2c3e50; text-align: center; }
+.priority-options { display: flex; flex-direction: column; padding: 8px 16px; }
+.priority-option { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 10px 12px; margin: 4px 0; border-radius: 8px; }
+.priority-tag { padding: 4px 12px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+.priority-0 { background-color: $priority-0-bg; color: $priority-0-color; }
+.priority-1 { background-color: $priority-1-bg; color: $priority-1-color; }
+.priority-2 { background-color: $priority-2-bg; color: $priority-2-color; }
+.priority-3 { background-color: $priority-3-bg; color: $priority-3-color; }
+.deadline-content { padding: 20px 16px; }
+.deadline-picker { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid #dfe3e8; border-radius: 10px; background-color: #f8fbf9; }
+.deadline-value { font-size: 14px; color: #2c3e50; }
+.date-placeholder { color: #9ca3af; }
+.assignee-option { display: flex; flex-direction: row; align-items: center; height: 52px; padding: 0 16px; }
+.selected-option { background-color: #e6fcf5; }
+.member-avatar { display: flex; flex-direction: row; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; height: 32px; border-radius: 16px; }
+.empty-avatar { background-color: #f1f3f5; }
+.avatar-initial { font-size: 14px; color: #fff; font-weight: 500; }
+.member-name { flex: 1; margin-left: 12px; font-size: 14px; color: #2c3e50; }
+.editor-footer { display: flex; flex-direction: row; padding: 12px 16px; border-top: 1px solid #f1f3f5; }
+.editor-button { flex: 1; height: 40px; line-height: 40px; font-size: 14px; color: #6c757d; background-color: #f7f8fa; border-radius: 8px; }
+.primary-button { margin-left: 12px; color: #fff; background-color: #42b983; }
+</style>

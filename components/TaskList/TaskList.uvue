@@ -1,0 +1,398 @@
+<template>
+	<view ref="listRoot" class="task-list-container">
+		<view v-if="dropdown" class="dropdown-backdrop" @click="closeAllDropdowns" />
+		<view v-for="group in sections" :key="group._id" class="task-group">
+			<view v-if="group._id" class="group-header" @click="toggleGroupCollapse(group._id)">
+				<TaskGlyph :type="collapsedGroups[group._id] ? 'right' : 'bottom'" :size="14" />
+				<text class="group-title">{{ group.name }}</text>
+				<text class="task-count">({{ group.tasks.length }})</text>
+				<view class="group-actions" @click.stop>
+					<view class="group-action-btn" title="编辑分组" @click.stop="emit('edit-group', group)"><TaskGlyph type="compose" /></view>
+					<view class="group-action-btn" title="归档分组" @click.stop="emit('archive-group', group)"><TaskGlyph type="download" color="#b8860b" /></view>
+					<view class="group-action-btn" title="删除分组" @click.stop="emit('delete-group', group)"><TaskGlyph type="trash" color="#e74c3c" /></view>
+				</view>
+			</view>
+			<view v-show="!collapsedGroups[group._id]" class="group-content">
+				<!-- 父页负责整页滚动。每个任务都是分组容器的直接子节点，供 WEB 排序。 -->
+				<view v-if="group.tasks.length" class="task-list" :data-sort-group="group._id">
+					<view v-for="item in group.tasks" :key="item._id" class="task-item-wrapper" :data-sort-task="item._id"
+						:class="{ 'task-completing': completing[item._id], 'task-menu-open': dropdown?.taskId === item._id }">
+						<SwipeableTaskItem v-if="!isPC" :task="item" @click="emit('task-click', item._id)" @finish="finishTask"
+							@edit="emit('edit-task', $event)" @delete="emit('delete-task', $event)">
+							<TaskItem :task="item" :members="members" @finish="finishTask" @save-deadline="onMobileDeadlineChange" />
+						</SwipeableTaskItem>
+						<view v-else class="pc-task-row" @click="emit('task-click', item._id)">
+							<!-- #ifdef WEB -->
+							<view class="drag-handle" data-sort-handle="true" title="拖动排序" @click.stop><TaskGlyph type="bars" :size="14" color="#9ca3af" /></view>
+							<!-- #endif -->
+							<checkbox :checked="item.status === 2 || !!completing[item._id]" color="#42b983" @click.stop="finishTask(item._id)" />
+							<view class="task-title-row">
+								<text class="task-title" :class="{ 'completed-title': item.status === 2 }">{{ item.title }}</text>
+								<text v-if="item.status === 1" class="in-progress">{{ getStatusText(item.status) }}</text>
+								<view v-if="item.subtaskCount?.total > 0" class="subtask-badge">
+									<TaskGlyph type="list" :size="12" />
+									<text class="subtask-count" :class="{ 'subtask-all-done': item.subtaskCount.completed === item.subtaskCount.total }">{{ item.subtaskCount.completed }}/{{ item.subtaskCount.total }}</text>
+								</view>
+							</view>
+							<text class="deadline" :class="{ 'overdue': isOverdue(item.deadline) }" @click.stop="handleDeadlineClick(item._id, item.deadline, $event)">{{ formatDeadline(item.deadline) || '设置截止日期' }}</text>
+							<text class="priority-tag" :class="'priority-' + (item.priority || 0)" @click.stop="togglePriorityDropdown(item._id, item.priority)">{{ getPriorityText(item.priority) }}</text>
+							<view class="assignee" @click.stop="toggleAssigneeDropdown(item._id, item.assignee)">
+								<image v-if="assigneeAvatar(item.assignee)" class="small-avatar" :src="assigneeAvatar(item.assignee)" mode="aspectFill" />
+								<view v-else-if="assigneeId(item.assignee)" class="small-avatar" :style="{ backgroundColor: getAvatarColor(assigneeName(item.assignee)) }">
+									<text class="avatar-initial">{{ assigneeName(item.assignee).slice(0, 1) }}</text>
+								</view>
+								<TaskGlyph v-else type="person" :size="14" color="#42b983" />
+							</view>
+							<view class="task-hover-actions">
+								<view class="hover-action" title="删除任务" @click.stop="emit('delete-task', item._id)"><TaskGlyph type="trash" :size="14" color="#e74c3c" /></view>
+								<view class="hover-action" title="编辑任务" @click.stop="emit('edit-task', item._id)"><TaskGlyph type="compose" :size="14" /></view>
+							</view>
+						</view>
+
+						<view v-if="isPC && dropdown?.taskId === item._id" class="task-item-dropdown" :class="dropdown.type === 'priority' ? 'priority-menu' : 'assignee-menu'" @click.stop>
+							<template v-if="dropdown.type === 'priority'">
+								<view v-for="opt in PRIORITY_OPTIONS" :key="opt.value" class="menu-option" :class="{ 'selected-option': dropdown.value === opt.value }" @click="selectPriority(item._id, opt.value)">
+									<view class="priority-dot" :style="{ backgroundColor: PRIORITY_COLORS[opt.value].color }" />
+									<text class="option-name">{{ opt.text }}</text>
+									<TaskGlyph v-if="dropdown.value === opt.value" type="checkmarkempty" color="#42b983" />
+								</view>
+							</template>
+							<template v-else>
+								<view class="assignee-search">
+									<TaskGlyph type="search" color="#999" />
+									<input v-model="assigneeSearchKeyword" class="search-input" placeholder="输入关键字查询" />
+									<TaskGlyph type="person" color="#999" />
+								</view>
+								<list-view direction="vertical" :style="{ height: Math.min((filteredMembers.length + 1) * 52, 240) + 'px' }">
+									<list-item>
+										<view class="menu-option member-option" :class="{ 'selected-option': !dropdown.value }" @click="selectAssignee(item._id, null)">
+											<view class="member-avatar"><TaskGlyph type="person" :size="24" color="#42b983" /></view>
+											<text class="option-name">无负责人</text>
+											<TaskGlyph v-if="!dropdown.value" type="checkmarkempty" :size="18" color="#42b983" />
+										</view>
+									</list-item>
+									<list-item v-for="member in filteredMembers" :key="member.value">
+										<view class="menu-option member-option" :class="{ 'selected-option': dropdown.value === member.value }" @click="selectAssignee(item._id, member.value)">
+											<image v-if="member.avatar" class="member-avatar" :src="member.avatar" mode="aspectFill" />
+											<view v-else class="member-avatar" :style="{ backgroundColor: getAvatarColor(member.text) }"><text class="avatar-initial">{{ member.text?.slice(0, 1) }}</text></view>
+											<text class="option-name">{{ member.text }}</text>
+											<TaskGlyph v-if="dropdown.value === member.value" type="checkmarkempty" :size="18" color="#42b983" />
+										</view>
+									</list-item>
+								</list-view>
+							</template>
+						</view>
+					</view>
+				</view>
+				<text v-else-if="group._id" class="empty-group-hint">暂无任务</text>
+				<view v-if="isPC" class="quick-add-section">
+					<view class="quick-add-trigger" @click="emit('add-task', group._id)"><TaskGlyph type="plusempty" :size="14" color="#42b983" /><text class="quick-add-label">添加新任务</text></view>
+				</view>
+			</view>
+		</view>
+	</view>
+</template>
+
+<script setup>
+import TaskItem from '../TaskItem/TaskItem.uvue'
+import SwipeableTaskItem from './SwipeableTaskItem.uvue'
+import TaskGlyph from './TaskGlyph.uvue'
+import { formatDeadline, isOverdue, getPriorityText, getStatusText, getAvatarColor, PRIORITY_OPTIONS, PRIORITY_COLORS } from '@/utils/task.js'
+// #ifdef WEB
+import { BREAKPOINTS } from '@/utils/responsive.js'
+import { openWebDatePicker } from '../TaskQuickEdit/webDatePicker.js'
+// #endif
+
+const props = defineProps({
+	tasks: { type: Array, default: () => [] },
+	groups: { type: Array, default: () => [] },
+	members: { type: Array, default: () => [] },
+	hasFilter: { type: Boolean, default: false }
+})
+const emit = defineEmits(['task-click', 'finish-task', 'set-assignee', 'save-deadline', 'open-deadline-picker', 'edit-group',
+	'archive-group', 'delete-group', 'delete-task', 'edit-task', 'change-priority', 'add-task'])
+const listRoot = ref(null)
+const collapsedGroups = reactive({})
+const completing = reactive({})
+const finishTimers = new Map()
+const dropdown = ref(null)
+const assigneeSearchKeyword = ref('')
+const filteredMembers = computed(() => {
+	const keyword = assigneeSearchKeyword.value.toLowerCase()
+	if (!keyword) return props.members
+	return props.members.filter(member => member.text?.toLowerCase().includes(keyword) || member.realName?.toLowerCase().includes(keyword))
+})
+
+function desktopLayout() {
+	// #ifdef WEB
+	return uni.getWindowInfo().windowWidth >= BREAKPOINTS.MOBILE
+	// #endif
+	// #ifndef WEB
+	return ['windows', 'mac', 'linux'].includes(uni.getDeviceInfo().platform)
+	// #endif
+}
+const isPC = ref(desktopLayout())
+
+function relationId(value) {
+	return Array.isArray(value) ? value[0]?._id : value
+}
+
+// #ifdef WEB
+// 父页换回新查询的任务对象后，以服务端排序为准。
+const savedOrders = reactive(new WeakMap())
+const sortPreview = shallowRef(null)
+function orderOf(task) { return savedOrders.get(task) ?? task.order ?? 0 }
+// #endif
+
+const sections = computed(() => {
+	const byGroup = new Map()
+	for (const task of props.tasks) {
+		const id = relationId(task.group_id) || ''
+		if (!byGroup.has(id)) byGroup.set(id, [])
+		byGroup.get(id).push(task)
+	}
+	// #ifdef WEB
+	for (const [id, tasks] of byGroup) {
+		if (sortPreview.value?.groupId === id) {
+			const positions = sortPreview.value.positions
+			tasks.sort((a, b) => (positions.get(a._id) ?? tasks.length) - (positions.get(b._id) ?? tasks.length))
+		} else if (tasks.some(task => savedOrders.has(task))) {
+			tasks.sort((a, b) => orderOf(a) - orderOf(b))
+		}
+	}
+	// #endif
+	const groups = props.groups.map(group => ({ ...group, tasks: byGroup.get(group._id) || [] }))
+		.filter(group => !props.hasFilter || group.tasks.length > 0)
+		.sort((a, b) => (a.order || 0) - (b.order || 0))
+	return [{ _id: '', tasks: byGroup.get('') || [] }, ...groups]
+})
+
+function closeAllDropdowns() {
+	dropdown.value = null
+	assigneeSearchKeyword.value = ''
+}
+function closeAssigneeDropdown() { if (dropdown.value?.type === 'assignee') closeAllDropdowns() }
+function closePriorityDropdown() { if (dropdown.value?.type === 'priority') closeAllDropdowns() }
+
+function toggleGroupCollapse(groupId) {
+	closeAllDropdowns()
+	collapsedGroups[groupId] = !collapsedGroups[groupId]
+}
+
+function finishTask(taskId) {
+	if (completing[taskId]) return
+	completing[taskId] = true
+	finishTimers.set(taskId, setTimeout(() => {
+		emit('finish-task', taskId)
+		finishTimers.set(taskId, setTimeout(() => {
+			delete completing[taskId]
+			finishTimers.delete(taskId)
+		}, 100))
+	}, 400))
+}
+
+function assigneeId(value) { return relationId(value) || null }
+function assigneeName(value) {
+	const id = assigneeId(value)
+	if (!id) return '未分配'
+	const user = Array.isArray(value) ? value[0] : null
+	if (user) return user.realname || user.real_name || user.nickname || user.username || user.mobile || '未知用户'
+	const member = props.members.find(item => item.value === id)
+	return member?.realName || member?.nickname || member?.username || member?.text || '未知用户'
+}
+function assigneeAvatar(value) {
+	return (Array.isArray(value) && value[0]?.avatar_file?.url) || props.members.find(item => item.value === assigneeId(value))?.avatar || ''
+}
+
+function toggleDropdown(type, taskId, value) {
+	const wasOpen = dropdown.value?.type === type && dropdown.value.taskId === taskId
+	closeAllDropdowns()
+	if (!wasOpen) dropdown.value = { type, taskId, value }
+}
+function togglePriorityDropdown(taskId, priority) { toggleDropdown('priority', taskId, priority || 0) }
+function toggleAssigneeDropdown(taskId, assignee) { toggleDropdown('assignee', taskId, assigneeId(assignee)) }
+function selectPriority(taskId, priority) {
+	closeAllDropdowns()
+	emit('change-priority', { taskId, priority })
+}
+function selectAssignee(taskId, memberId) {
+	emit('set-assignee', { taskId, memberId })
+	closeAllDropdowns()
+}
+function onMobileDeadlineChange(taskId, dateString) { emit('save-deadline', taskId, dateString) }
+
+// #ifdef WEB
+let closeDateInput = null
+// #endif
+function handleDeadlineClick(taskId, currentDeadline, event) {
+	if (!isPC.value) {
+		emit('open-deadline-picker', taskId, currentDeadline)
+		return
+	}
+	// #ifdef WEB
+	if (closeDateInput) closeDateInput()
+	const target = event?.currentTarget || event?.mp?.currentTarget
+	const rect = target?.getBoundingClientRect?.()
+	const position = { left: rect?.left ?? event?.detail?.x, top: rect?.bottom ?? event?.detail?.y }
+	const value = currentDeadline ? new Date(currentDeadline).toISOString().slice(0, 10) : ''
+	closeDateInput = openWebDatePicker(value, position, date => emit('save-deadline', taskId, date))
+	// #endif
+	// #ifndef WEB
+	emit('save-deadline', taskId, currentDeadline)
+	// #endif
+}
+
+// #ifdef WEB
+let mounted = false
+let Sortable
+const sortables = new Map()
+async function reorder(groupId, taskId, from, to) {
+	const rows = sections.value.find(group => group._id === groupId)?.tasks
+	if (sortPreview.value || !rows || rows[from]?._id !== taskId || !rows[to] || from === to) return
+	const ordered = rows.slice()
+	const [moved] = ordered.splice(from, 1)
+	ordered.splice(to, 0, moved)
+	sortPreview.value = { groupId, positions: new Map(ordered.map((row, index) => [row._id, index])) }
+	try {
+		const collection = uniCloud.databaseForJQL().collection('opendb-task')
+		async function write(task, order) {
+			await collection.doc(task._id).update({ order })
+			savedOrders.set(task, order)
+		}
+		const previous = ordered[to - 1]
+		const next = ordered[to + 1]
+		// 历史任务的整数 order 可能相同。先从尾向前留出间隔，中断也能保住原顺序。
+		if (previous && next && orderOf(next) - orderOf(previous) < 2) {
+			const ranks = []
+			for (const task of rows) ranks.push(ranks.length ? Math.max(orderOf(task), ranks[ranks.length - 1] + 2) : orderOf(task))
+			for (let i = rows.length - 1; i >= 0; i--) {
+				if (ranks[i] !== orderOf(rows[i])) await write(rows[i], ranks[i])
+			}
+		}
+		let rank
+		if (!previous) rank = orderOf(next) - 2
+		else if (!next) rank = orderOf(previous) + 2
+		else rank = Math.floor((orderOf(previous) + orderOf(next)) / 2)
+		await write(moved, rank)
+	} catch (error) {
+		console.error('保存任务排序失败', error)
+		uni.showToast({ title: '排序保存失败', icon: 'none' })
+	} finally {
+		sortPreview.value = null
+	}
+}
+
+async function syncSortables() {
+	const root = listRoot.value?.$el || listRoot.value
+	const lists = mounted && isPC.value && root ? Array.from(root.querySelectorAll('[data-sort-group]')) : []
+	for (const [list, instance] of sortables) {
+		if (!lists.includes(list)) { instance.destroy(); sortables.delete(list) }
+	}
+	if (!lists.length) return
+	if (!Sortable) Sortable = (await import('sortablejs')).default
+	for (const list of lists) {
+		if (!mounted || !isPC.value || !root.contains(list) || sortables.has(list)) continue
+		let originalNext = null
+		const instance = Sortable.create(list, {
+			draggable: '[data-sort-task]', handle: '[data-sort-handle]', animation: 150,
+			onStart(event) { originalNext = event.item.nextSibling; closeAllDropdowns() },
+			onMove() { return !sortPreview.value },
+			onEnd(event) {
+				const { item, oldDraggableIndex: from, newDraggableIndex: to } = event
+				if (from === to) return
+				// 先归还 Sortable 移动的 DOM，再让 Vue 按业务 key 更新节点。
+				list.insertBefore(item, originalNext?.parentNode === list ? originalNext : null)
+				reorder(list.dataset.sortGroup, item.dataset.sortTask, from, to)
+			}
+		})
+		sortables.set(list, instance)
+	}
+}
+
+function resize() {
+	isPC.value = desktopLayout()
+	if (!isPC.value) closeAllDropdowns()
+}
+watch([sections, isPC], syncSortables, { flush: 'post' })
+onMounted(() => {
+	mounted = true
+	window.addEventListener('resize', resize)
+	syncSortables()
+})
+// #endif
+
+onBeforeUnmount(() => {
+	for (const timer of finishTimers.values()) clearTimeout(timer)
+	// #ifdef WEB
+	mounted = false
+	window.removeEventListener('resize', resize)
+	for (const instance of sortables.values()) instance.destroy()
+	sortables.clear()
+	if (closeDateInput) closeDateInput()
+	// #endif
+})
+defineExpose({ closeAllDropdowns, closePriorityDropdown, closeAssigneeDropdown, togglePriorityDropdown, toggleAssigneeDropdown, handleDeadlineClick })
+</script>
+
+<style lang="scss" scoped>
+@import '@/common/_priority.scss';
+.task-list-container { display: flex; flex-direction: column; padding: 0 12px 12px; position: relative; overflow: visible; }
+.task-group { display: flex; flex-direction: column; margin-bottom: 24px; background-color: #fff; border-radius: 8px; overflow: visible; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1); }
+.group-header { display: flex; flex-direction: row; align-items: center; padding: 12px 16px; background-color: #f8faf8; border-bottom: 1px solid #e9ecef; border-left: 3px solid #42b983; }
+.group-title { margin-left: 8px; font-size: 14px; font-weight: 600; color: #2c3e50; }
+.task-count { margin-left: 8px; flex: 1; font-size: 12px; color: #6c757d; }
+.group-actions { display: flex; flex-direction: row; align-items: center; }
+.group-action-btn { display: flex; flex-direction: row; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; }
+.group-content, .task-list, .task-item-wrapper { display: flex; flex-direction: column; overflow: visible; }
+.task-item-wrapper { position: relative; transition: transform 0.4s ease, opacity 0.4s ease; }
+.task-completing { opacity: 0; transform: translateX(50px); background-color: #d1f7e8; }
+.empty-group-hint { padding: 16px; text-align: center; color: #9ca3af; font-size: 13px; }
+.pc-task-row { display: flex; flex-direction: row; align-items: center; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; }
+.drag-handle { padding: 4px; margin-right: 4px; }
+.task-title-row { display: flex; flex-direction: row; flex: 1; min-width: 0; align-items: center; margin-left: 8px; }
+.task-title { font-size: 14px; line-height: 21px; color: #2c3e50; font-weight: 500; flex-shrink: 1; }
+.completed-title { color: #9ca3af; text-decoration: line-through; }
+.in-progress { margin-left: 6px; font-size: 11px; color: #53759a; }
+.subtask-badge { display: flex; flex-direction: row; align-items: center; margin-left: 8px; padding: 2px 8px; background-color: #f3f4f6; border-radius: 10px; }
+.subtask-count { font-size: 11px; font-weight: 500; color: #6c757d; margin-left: 4px; }
+.subtask-all-done { color: #42b983; }
+.deadline { margin-left: 8px; min-width: 80px; padding: 4px 8px; border-radius: 6px; font-size: 12px; text-align: center; background-color: #f7f8fa; color: #6c757d; }
+.overdue { color: #e74c3c; background-color: #fdecea; }
+.priority-tag { margin-left: 8px; width: 36px; padding: 2px 0; border-radius: 4px; text-align: center; font-size: 11px; font-weight: 500; }
+.priority-0 { background-color: $priority-0-bg; color: $priority-0-color; }
+.priority-1 { background-color: $priority-1-bg; color: $priority-1-color; }
+.priority-2 { background-color: $priority-2-bg; color: $priority-2-color; }
+.priority-3 { background-color: $priority-3-bg; color: $priority-3-color; }
+.assignee, .small-avatar, .member-avatar { display: flex; flex-direction: row; align-items: center; justify-content: center; flex-shrink: 0; }
+.assignee { width: 28px; height: 28px; margin-left: 8px; border-radius: 14px; background-color: #e6fcf5; }
+.small-avatar { width: 24px; height: 24px; border-radius: 12px; }
+.member-avatar { width: 36px; height: 36px; border-radius: 18px; }
+.avatar-initial { color: #fff; font-size: 12px; font-weight: 600; }
+.task-hover-actions { display: flex; flex-direction: row; align-items: center; margin-left: 8px; padding: 4px; background-color: #42b983; border-radius: 6px; }
+.hover-action { display: flex; flex-direction: row; align-items: center; justify-content: center; width: 22px; height: 22px; margin: 0 2px; background-color: #fff; border-radius: 4px; }
+.dropdown-backdrop { position: fixed; top: 0; bottom: 0; left: 0; right: 0; z-index: 999; }
+.task-menu-open { z-index: 1000; }
+.task-item-dropdown { position: absolute; top: 100%; right: 0; z-index: 1001; display: flex; flex-direction: column; margin-top: 4px; background-color: #fff; border-radius: 10px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15); overflow: hidden; }
+.priority-menu { width: 140px; padding: 8px 0; }
+.assignee-menu { width: 240px; }
+.menu-option { display: flex; flex-direction: row; align-items: center; padding: 10px 14px; }
+.member-option { height: 52px; padding: 0 16px; }
+.selected-option { background-color: #e6fcf5; }
+.priority-dot { width: 10px; height: 10px; border-radius: 5px; }
+.option-name { margin-left: 10px; flex: 1; font-size: 14px; color: #333; }
+.assignee-search { display: flex; flex-direction: row; align-items: center; padding: 12px 16px; border-bottom: 1px solid #f0f0f0; }
+.search-input { flex: 1; margin: 0 8px; font-size: 14px; color: #333; }
+.quick-add-section { display: flex; flex-direction: row; padding: 12px 16px; }
+.quick-add-trigger { display: flex; flex-direction: row; align-items: center; padding: 6px 0; }
+.quick-add-label { margin-left: 6px; font-size: 14px; font-weight: 500; color: #42b983; }
+/* #ifdef WEB */
+.pc-task-row, .group-header, .menu-option, .quick-add-trigger { cursor: pointer; }
+.drag-handle { cursor: grab; }
+@media (hover: hover) {
+	.group-actions, .task-hover-actions { opacity: 0; }
+	.group-header:hover .group-actions, .pc-task-row:hover .task-hover-actions { opacity: 1; }
+	.pc-task-row:hover, .group-header:hover { background-color: #f0fdf7; }
+	.menu-option:hover, .group-action-btn:hover { background-color: #d1f7e8; }
+}
+/* #endif */
+</style>
