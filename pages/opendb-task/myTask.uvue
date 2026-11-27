@@ -1,0 +1,303 @@
+<!-- 我的未完成任务，按项目及分组显示。子任务沿用父任务分组。 -->
+<template>
+	<view class="my-task-page">
+		<view class="body">
+			<view class="page-header" :class="{ immersive: immersive }" :style="headerStyle">
+				<!-- #ifndef MP-WEIXIN -->
+				<text class="page-title" :class="{ 'mobile-title': immersive }">我的任务</text>
+				<!-- #endif -->
+				<text v-if="totalCount" class="summary">共 {{ totalCount }} 项待办</text>
+			</view>
+			<!-- #ifdef APP -->
+			<list-view class="task-list" direction="vertical" :refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="pullToRefresh">
+				<list-item>
+			<!-- #endif -->
+					<view v-if="loading || !totalCount" class="empty-state">
+						<text class="empty-text">{{ loading ? '加载中...' : '暂无分配给你的任务' }}</text>
+						<text v-if="!loading" class="hint">当有人将任务分配给你时，会显示在这里</text>
+					</view>
+			<!-- #ifdef APP -->
+				</list-item>
+				<list-item v-for="row in rows" :key="row.key" :type="row.type">
+			<!-- #endif -->
+			<!-- #ifndef APP -->
+				<view v-for="row in rows" :key="row.key">
+			<!-- #endif -->
+					<view v-if="row.kind === 'project'" class="project-header" @tap="toggleProject(row.projectId)">
+						<view class="project-info">
+							<text class="fold">{{ collapsed[row.projectId] ? '›' : '⌄' }}</text>
+							<text class="project-name">{{ row.name }}</text>
+							<text class="count">({{ row.count }})</text>
+						</view>
+						<text class="project-action" @tap.stop="goToProject(row.projectId, row.name)">›</text>
+					</view>
+					<view v-else-if="row.kind === 'group'" class="group-header">
+						<text class="group-name">{{ row.name }}</text>
+						<text class="count">({{ row.count }})</text>
+					</view>
+					<view v-else-if="row.kind === 'parent'" class="parent-task" @tap="goToTaskDetail(row.task._id, row.projectId)">
+						<checkbox disabled class="checkbox-disabled" />
+						<text class="parent-title">{{ row.task.title }}</text>
+						<text class="parent-assignee">{{ row.task.assigneeName || '无负责人' }}</text>
+					</view>
+					<view v-else class="task-row" :class="{ 'child-task': row.child }" @click="goToTaskDetail(row.task._id, row.projectId)">
+						<TaskItem :task="row.task" :members="memberList" :show-assignee="false" @finish="finishTask" @save-deadline="saveDeadline" />
+					</view>
+			<!-- #ifndef APP -->
+				</view>
+			<!-- #endif -->
+			<!-- #ifdef APP -->
+				</list-item>
+			</list-view>
+			<!-- #endif -->
+		</view>
+	</view>
+</template>
+
+<script setup>
+import TaskItem from '@/components/TaskItem/TaskItem.uvue'
+import { getCurrentUserId } from '@/utils/auth.js'
+import { createTopInsetStyle } from '@/utils/layout.js'
+
+const db = uniCloud.databaseForJQL()
+const loading = ref(true)
+const refreshing = ref(false)
+const projectList = ref([])
+const collapsed = reactive({})
+const memberList = []
+const immersive = ref(false)
+const headerStyle = ref({})
+const finishing = new Set()
+let currentUserId = ''
+let requestId = 0
+let refreshOnShow = true
+const totalCount = computed(() => projectList.value.reduce((sum, project) => sum + project.count, 0))
+
+// 原生列表复用单行，展开/折叠不改变任务数据，重复出现的灰色父行按对应子任务区分。
+const rows = computed(() => {
+	const result = []
+	if (loading.value) return result
+	for (const project of projectList.value) {
+		const projectId = project._id
+		result.push({ kind: 'project', type: 1, key: `project-${projectId}`, projectId, name: project.name, count: project.count })
+		if (collapsed[projectId]) continue
+		for (const group of project.groups) {
+			if (group._id) result.push({ kind: 'group', type: 2, key: `group-${group._id}`, name: group.name, count: group.tasks.length })
+			for (const task of group.tasks) {
+				if (task.parentTask) result.push({ kind: 'parent', type: 3, key: `parent-of-${task._id}`, projectId, task: task.parentTask })
+				result.push({ kind: 'task', type: 4, key: `task-${task._id}`, projectId, task, child: !!task.parentTask })
+				for (const child of task.children || []) {
+					result.push({ kind: 'task', type: 4, key: `task-${child._id}`, projectId, task: child, child: true })
+				}
+			}
+		}
+	}
+	return result
+})
+
+function updateLayout() {
+	const info = uni.getWindowInfo()
+	const isMobile = info.windowWidth < 768
+	let safeAreaTop = 0
+	// #ifndef MP
+	safeAreaTop = info.statusBarHeight || 0
+	immersive.value = isMobile
+	// #endif
+	headerStyle.value = createTopInsetStyle({ safeAreaTop, isMobile }, { mobileBase: 16, desktopBase: 0 })
+}
+
+function organizeTasks(tasks, projects, parents, groups) {
+	const valid = tasks.filter(task => projects.has(task.project_id))
+	const ownParents = new Map()
+	const standaloneChildren = []
+	for (const task of valid) {
+		if (!task.parent_id) ownParents.set(task._id, { ...task, children: [] })
+	}
+	for (const task of valid) {
+		if (!task.parent_id) continue
+		const ownParent = ownParents.get(task.parent_id)
+		if (ownParent) ownParent.children.push(task)
+		else standaloneChildren.push({ ...task, parentTask: parents.get(task.parent_id) })
+	}
+	const byProject = new Map()
+	for (const task of [...ownParents.values(), ...standaloneChildren]) {
+		const id = task.project_id
+		if (!byProject.has(id)) byProject.set(id, { _id: id, name: projects.get(id).name, count: 0, groups: new Map() })
+		const project = byProject.get(id)
+		project.count += 1 + (task.children?.length || 0)
+		const group = groups.get(task.parentTask ? task.parentTask.group_id : task.group_id)
+		const key = group?._id || ''
+		if (!project.groups.has(key)) project.groups.set(key, { ...group, _id: key, tasks: [] })
+		project.groups.get(key).tasks.push(task)
+	}
+	return [...byProject.values()].map(project => ({
+		...project,
+		groups: [...project.groups.values()].sort((a, b) => {
+			if (!a._id) return -1
+			if (!b._id) return 1
+			return (a.order || 0) - (b.order || 0)
+		})
+	})).sort((a, b) => b.count - a.count)
+}
+
+async function loadMyTasks() {
+	const request = ++requestId
+	const uid = getCurrentUserId()
+	if (uid !== currentUserId) {
+		projectList.value = []
+		for (const id of Object.keys(collapsed)) delete collapsed[id]
+		currentUserId = uid
+	}
+	if (!uid) {
+		loading.value = false
+		return
+	}
+	loading.value = true
+	try {
+		const { data: tasks } = await db.collection('opendb-task').where({ assignee: uid, status: db.command.neq(2) })
+			.field('_id,title,deadline,priority,status,project_id,group_id,parent_id,assignee').orderBy('deadline asc').limit(500).get()
+		if (request !== requestId) return
+		const projectIds = [...new Set(tasks.map(t => t.project_id).filter(Boolean))]
+		if (!projectIds.length) {
+			projectList.value = []
+			return
+		}
+		const parentIds = [...new Set(tasks.map(t => t.parent_id).filter(Boolean))]
+		const parents = new Map()
+		if (parentIds.length) {
+			const taskTemp = db.collection('opendb-task').where({ _id: db.command.in(parentIds) }).field('_id,title,assignee,group_id').limit(parentIds.length).getTemp()
+			const userTemp = db.collection('uni-id-users').field('_id,nickname').getTemp()
+			const { data } = await db.collection(taskTemp, userTemp).get()
+			for (const task of data) parents.set(task._id, { ...task, assigneeName: task.assignee?.[0]?.nickname })
+		}
+		const groupIds = [...new Set([...tasks, ...parents.values()].map(t => t.group_id).filter(Boolean))]
+		const [projects, groups] = await Promise.all([
+			db.collection('opendb-projects').where({ _id: db.command.in(projectIds) }).field('_id,name').limit(projectIds.length).get(),
+			groupIds.length ? db.collection('task-group').where({ _id: db.command.in(groupIds) }).field('_id,name,order').limit(groupIds.length).get() : { data: [] }
+		])
+		if (request === requestId) {
+			projectList.value = organizeTasks(tasks, new Map(projects.data.map(p => [p._id, p])), parents, new Map(groups.data.map(g => [g._id, g])))
+		}
+	} catch (error) {
+		if (request === requestId) uni.showToast({ title: error.errMsg || error.message || '加载失败', icon: 'none' })
+	} finally {
+		if (request === requestId) loading.value = false
+	}
+}
+
+function toggleProject(projectId) {
+	collapsed[projectId] = !collapsed[projectId]
+}
+
+function goToProject(id, name) {
+	uni.navigateTo({ url: `/pages/opendb-task/list?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}` })
+}
+
+function markForRefresh() {
+	refreshOnShow = true
+}
+
+function goToTaskDetail(id, projectId) {
+	uni.navigateTo({
+		url: `/pages/opendb-task/detail?id=${encodeURIComponent(id)}&pid=${encodeURIComponent(projectId)}`,
+		// #ifdef WEB || MP || APP-HARMONY
+		events: { refreshTaskList: markForRefresh }
+		// #endif
+	})
+}
+
+async function finishTask(taskId) {
+	if (finishing.has(taskId)) return
+	finishing.add(taskId)
+	try {
+		await db.collection('opendb-task').doc(taskId).update({ status: 2 })
+		uni.showToast({ title: '已完成', icon: 'success' })
+		await loadMyTasks()
+	} catch (error) {
+		uni.showToast({ title: error.errMsg || error.message || '操作失败', icon: 'none' })
+	} finally {
+		finishing.delete(taskId)
+	}
+}
+
+async function saveDeadline(taskId, value) {
+	const deadline = value ? new Date(value.replace(/\//g, '-')).getTime() : null
+	try {
+		await db.collection('opendb-task').doc(taskId).update({ deadline })
+		for (const project of projectList.value) {
+			for (const group of project.groups) {
+				for (const task of group.tasks) {
+					const match = task._id === taskId ? task : task.children?.find(child => child._id === taskId)
+					if (match) match.deadline = deadline
+				}
+			}
+		}
+		uni.showToast({ title: deadline === null ? '截止日期已清除' : '截止日期已更新', icon: 'success' })
+	} catch (error) {
+		uni.showToast({ title: error.errMsg || error.message || '更新失败', icon: 'none' })
+	}
+}
+
+async function pullToRefresh() {
+	if (refreshing.value) return
+	refreshing.value = true
+	try {
+		await loadMyTasks()
+	} finally {
+		refreshing.value = false
+		// #ifndef APP
+		uni.stopPullDownRefresh()
+		// #endif
+	}
+}
+
+onLoad(updateLayout)
+onResize(updateLayout)
+onPageHide(markForRefresh)
+onPageShow(() => {
+	if (refreshOnShow) {
+		refreshOnShow = false
+		loadMyTasks()
+	}
+})
+// #ifndef APP
+onPullDownRefresh(pullToRefresh)
+// #endif
+onUnload(() => { requestId++ })
+</script>
+
+<style scoped>
+.my-task-page { flex: 1; display: flex; flex-direction: column; background-color: #f7f8fa; }
+.body { flex: 1; display: flex; flex-direction: column; padding: 0 16px 16px; }
+.page-header { display: flex; flex-direction: row; align-items: center; margin-bottom: 10px; }
+.immersive { justify-content: space-between; padding: 0 12px 10px; background-color: #edf8f2; }
+.page-title { font-size: 24px; color: #2c3e50; font-weight: 700; }
+.mobile-title { font-size: 17px; }
+.summary { margin-left: 10px; padding: 3px 8px; border-radius: 12px; background-color: #ffffff; color: #28724e; font-size: 13px; }
+.task-list { flex: 1; }
+.empty-state { display: flex; flex-direction: column; align-items: center; padding: 64px 16px; }
+.empty-text { font-size: 15px; color: #6c757d; }
+.hint { margin-top: 8px; font-size: 13px; color: #738176; }
+.project-header { display: flex; flex-direction: row; align-items: center; margin-top: 14px; padding: 8px 12px; border-left: 4px solid #42b983; background-color: #ffffff; border-radius: 8px; }
+.project-info { flex: 1; display: flex; flex-direction: row; align-items: center; }
+.fold, .project-action { color: #28724e; font-size: 21px; }
+.project-name { margin-left: 8px; font-size: 16px; color: #243447; font-weight: 600; }
+.count { margin-left: 6px; color: #6c757d; font-size: 13px; }
+.project-action { padding: 4px 8px; }
+.group-header { display: flex; flex-direction: row; align-items: center; padding: 10px 16px 8px 28px; background-color: #edf5f0; }
+.group-name { color: #2c3e50; font-size: 14px; font-weight: 600; }
+.parent-task { display: flex; flex-direction: row; align-items: center; padding: 8px 12px; margin: 4px 0 0 12px; background-color: #edf0f2; border-radius: 8px; }
+.checkbox-disabled { opacity: 0.4; }
+.parent-title { flex: 1; margin-left: 8px; color: #66727f; font-size: 13px; }
+.parent-assignee { margin-left: 8px; color: #66727f; font-size: 12px; }
+.task-row { display: flex; flex-direction: column; padding-left: 16px; background-color: #ffffff; }
+.child-task { margin-left: 24px; padding-left: 8px; border-left: 2px solid #c6e9d8; }
+/* #ifdef WEB */
+.my-task-page { min-height: 100vh; }
+.body { align-self: center; width: 100%; max-width: 1200px; padding-bottom: calc(16px + var(--tabbar-height, 50px) + var(--safe-area-bottom, 0px)); box-sizing: border-box; }
+@media (min-width: 768px) {
+	.body { padding: 32px 48px; }
+	.page-title { font-size: 28px; }
+}
+/* #endif */
+</style>

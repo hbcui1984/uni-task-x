@@ -1,0 +1,264 @@
+<!-- 已完成任务按日期分组，可按负责人筛选、分页或恢复任务。 -->
+<template>
+	<view class="container">
+		<CustomNavBar :title="projectName" subtitle="已完成任务" />
+		<view class="body">
+			<view class="filter-bar">
+				<text class="filter-label">负责人</text>
+				<picker mode="selector" :range="memberOptions" range-key="text" :value="memberIndex" @change="changeAssignee">
+					<text class="filter-value">{{ memberOptions[memberIndex].text }}</text>
+				</picker>
+				<text v-if="totalCount" class="count">共 {{ totalCount }} 项</text>
+			</view>
+			<!-- #ifdef APP -->
+			<list-view class="task-list" direction="vertical" :refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="pullToRefresh" @scrolltolower="loadMore">
+				<list-item>
+			<!-- #endif -->
+					<view v-if="!tasks.length" class="empty-state">
+						<text v-if="loading" class="hint">加载中...</text>
+						<text v-else-if="failed" class="link" @tap="loadTasks(true)">加载失败，点击重试</text>
+						<text v-else class="hint">暂无已完成的任务</text>
+					</view>
+			<!-- #ifdef APP -->
+				</list-item>
+			<!-- #endif -->
+			<!-- #ifndef APP -->
+				<view v-for="group in groupedTasks" :key="group.date" class="date-group">
+			<!-- #endif -->
+			<!-- #ifdef APP -->
+				<sticky-section v-for="group in groupedTasks" :key="group.date">
+					<sticky-header>
+			<!-- #endif -->
+						<view class="date-divider">
+							<text class="date-label">{{ formatDateLabel(group.date) || '日期未知' }}</text>
+							<text class="date-count">{{ group.tasks.length }} 项</text>
+						</view>
+			<!-- #ifdef APP -->
+					</sticky-header>
+					<list-item v-for="item in group.tasks" :key="item._id" :type="1">
+			<!-- #endif -->
+			<!-- #ifndef APP -->
+					<view v-for="item in group.tasks" :key="item._id">
+			<!-- #endif -->
+						<view class="task-item" @tap="openTask(item._id)">
+							<text class="check">✓</text>
+							<view class="task-content">
+								<text class="task-title">{{ item.title }}</text>
+								<view class="meta">
+									<text v-if="groupNames[item.group_id]" class="meta-text">{{ groupNames[item.group_id] }}</text>
+									<text v-if="item.assignee?.[0]?.nickname" class="assignee">{{ item.assignee[0].nickname }}</text>
+									<text class="meta-text">{{ formatTime(item.completion_date) }}</text>
+								</view>
+							</view>
+							<text class="restore" @tap.stop="restoreTask(item._id)">恢复</text>
+						</view>
+			<!-- #ifndef APP -->
+					</view>
+			<!-- #endif -->
+			<!-- #ifdef APP -->
+					</list-item>
+				</sticky-section>
+			<!-- #endif -->
+			<!-- #ifndef APP -->
+				</view>
+			<!-- #endif -->
+			<!-- #ifdef APP -->
+				<list-item>
+			<!-- #endif -->
+					<text v-if="tasks.length" class="load-more" @tap="loadMore">{{ loading ? '加载中...' : ended ? '没有更多数据了' : '点击加载更多' }}</text>
+			<!-- #ifdef APP -->
+				</list-item>
+			</list-view>
+			<!-- #endif -->
+		</view>
+	</view>
+</template>
+
+<script setup>
+import CustomNavBar from '@/components/CustomNavBar/CustomNavBar.uvue'
+import { formatDateLabel, formatTime } from '@/utils/date.js'
+
+const db = uniCloud.databaseForJQL()
+const projectName = ref('')
+let projectId = ''
+const memberOptions = ref([{ value: '', text: '全部' }])
+const memberIndex = ref(0)
+const groupNames = reactive({})
+const tasks = ref([])
+const totalCount = ref(0)
+const loading = ref(false)
+const refreshing = ref(false)
+const failed = ref(false)
+const ended = ref(false)
+const pageSize = 20
+let page = 0
+let requestId = 0
+let restoring = false
+
+const groupedTasks = computed(() => {
+	const groups = {}
+	for (const task of tasks.value) {
+		const time = new Date(task.completion_date || task.create_date)
+		const date = Number.isFinite(time.getTime()) ? time.toISOString().slice(0, 10) : ''
+		if (!groups[date]) groups[date] = []
+		groups[date].push(task)
+	}
+	return Object.keys(groups).sort().reverse().map(date => ({ date, tasks: groups[date] }))
+})
+
+async function loadMembers() {
+	try {
+		const { data } = await db.collection('opendb-projects').doc(projectId).field('members,managers').get()
+		const project = data[0]
+		const ids = [...new Set([...(project?.members || []), ...(project?.managers || [])])]
+		if (!ids.length) return
+		const users = await db.collection('uni-id-users').where({ _id: db.command.in(ids) }).field('_id,nickname').get()
+		memberOptions.value.push(...users.data.map(user => ({ value: user._id, text: user.nickname || '未命名用户' })))
+	} catch (error) {
+		console.error('加载成员失败', error)
+	}
+}
+
+async function loadGroups() {
+	try {
+		const { data } = await db.collection('task-group').where({ project_id: projectId }).field('_id,name').get()
+		for (const group of data) groupNames[group._id] = group.name
+	} catch (error) {
+		console.error('加载分组失败', error)
+	}
+}
+
+async function loadTasks(clear) {
+	if (!projectId || (!clear && (loading.value || ended.value))) return
+	// 新筛选可以取代正在执行的翻页请求，旧响应不可覆盖新列表。
+	const request = ++requestId
+	if (clear) {
+		page = 0
+		tasks.value = []
+		totalCount.value = 0
+		ended.value = false
+	}
+	loading.value = true
+	failed.value = false
+	const where = { project_id: projectId, status: 2 }
+	const assignee = memberOptions.value[memberIndex.value].value
+	if (assignee) where.assignee = assignee
+	try {
+		const taskTemp = db.collection('opendb-task').where(where)
+			.field('_id,title,assignee,group_id,completion_date,create_date')
+			.orderBy('completion_date desc, create_date desc').skip(page * pageSize).limit(pageSize).getTemp()
+		const userTemp = db.collection('uni-id-users').field('_id,nickname').getTemp()
+		const [result, count] = await Promise.all([
+			db.collection(taskTemp, userTemp).get(),
+			clear ? db.collection('opendb-task').where(where).count() : null
+		])
+		if (request !== requestId) return
+		if (count) totalCount.value = count.total
+		tasks.value.push(...result.data)
+		page++
+		ended.value = result.data.length < pageSize || tasks.value.length >= totalCount.value
+	} catch (error) {
+		if (request !== requestId) return
+		failed.value = true
+		uni.showToast({ title: error.errMsg || error.message || '加载失败', icon: 'none' })
+	} finally {
+		if (request === requestId) loading.value = false
+	}
+}
+
+function loadMore() {
+	if (tasks.value.length) return loadTasks(false)
+}
+
+function changeAssignee(event) {
+	const index = Number(event.detail.value)
+	if (!memberOptions.value[index] || memberIndex.value === index) return
+	memberIndex.value = index
+	return loadTasks(true)
+}
+
+function openTask(id) {
+	uni.navigateTo({ url: `/pages/opendb-task/detail?id=${encodeURIComponent(id)}&pid=${encodeURIComponent(projectId)}` })
+}
+
+async function restoreTask(id) {
+	if (restoring) return
+	restoring = true
+	try {
+		const { confirm } = await uni.showModal({ title: '恢复任务', content: '确定要将此任务恢复为未完成状态吗？' })
+		if (!confirm) return
+		await db.collection('opendb-task').doc(id).update({ status: 0, completion_date: null, completion_uid: null })
+		uni.showToast({ title: '已恢复', icon: 'success' })
+		await loadTasks(true)
+	} catch (error) {
+		uni.showToast({ title: error.errMsg || error.message || '操作失败', icon: 'none' })
+	} finally {
+		restoring = false
+	}
+}
+
+async function pullToRefresh() {
+	if (refreshing.value) return
+	refreshing.value = true
+	try {
+		await loadTasks(true)
+	} finally {
+		refreshing.value = false
+		// #ifndef APP
+		uni.stopPullDownRefresh()
+		// #endif
+	}
+}
+
+onLoad(options => {
+	projectId = options.id || ''
+	projectName.value = options.name || ''
+	try { projectName.value = decodeURIComponent(projectName.value) } catch { /* 路由已解码的名称可含字面百分号。 */ }
+	if (projectId) {
+		loadMembers()
+		loadGroups()
+	}
+})
+onPageShow(() => loadTasks(true))
+// #ifndef APP
+onPullDownRefresh(pullToRefresh)
+onReachBottom(loadMore)
+// #endif
+onUnload(() => { requestId++ })
+</script>
+
+<style scoped>
+.container { display: flex; flex-direction: column; flex: 1; background-color: #f7f8fa; }
+.body { display: flex; flex-direction: column; flex: 1; padding: 16px; }
+.filter-bar { display: flex; flex-direction: row; align-items: center; padding: 12px 16px; margin-bottom: 16px; background-color: #ffffff; border-radius: 12px; }
+.filter-label, .count { font-size: 14px; color: #6c757d; }
+.filter-value { min-width: 100px; margin-left: 8px; padding: 6px 12px; color: #2c3e50; font-size: 14px; border: 1px solid #dfe6e3; border-radius: 8px; }
+.count { flex: 1; text-align: right; }
+.task-list { flex: 1; }
+.date-group { display: flex; flex-direction: column; }
+.date-divider { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 16px; background-color: #359568; }
+.date-label { color: #ffffff; font-size: 14px; font-weight: 600; }
+.date-count { color: #ffffff; font-size: 12px; }
+.task-item { display: flex; flex-direction: row; align-items: flex-start; padding: 16px; border-bottom: 1px solid #edf0ee; background-color: #ffffff; }
+.check { width: 32px; height: 32px; line-height: 32px; text-align: center; border-radius: 16px; background-color: #e6fcf5; color: #28724e; }
+.task-content { display: flex; flex-direction: column; flex: 1; margin: 0 10px; }
+.task-title { font-size: 15px; color: #2c3e50; }
+.meta { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 6px; }
+.meta-text, .assignee { font-size: 12px; margin-right: 12px; color: #6c757d; }
+.assignee, .restore, .link { color: #28724e; }
+.restore { padding: 8px; font-size: 13px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; padding: 56px 16px; background-color: #ffffff; border-radius: 12px; }
+.hint, .load-more { font-size: 14px; color: #6c757d; }
+.load-more { padding: 16px; text-align: center; }
+/* #ifndef APP */
+.date-divider { position: sticky; top: 0; z-index: 1; }
+/* #endif */
+/* #ifdef WEB */
+.container { min-height: 100vh; }
+.body { width: 100%; max-width: 900px; align-self: center; box-sizing: border-box; }
+@media (min-width: 768px) {
+	.body { padding: 20px 32px; }
+	.task-title { font-size: 16px; }
+}
+/* #endif */
+</style>

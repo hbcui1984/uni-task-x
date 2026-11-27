@@ -1,0 +1,262 @@
+<!-- 项目下已归档的清单，支持查看任务、恢复以及删除分组。 -->
+<template>
+	<view class="container">
+		<CustomNavBar v-if="!isWideScreen" :title="projectName" subtitle="已归档清单" />
+		<view v-else class="pc-header">
+			<text class="back" @tap="goBack">‹</text>
+			<view class="heading">
+				<text class="project-name">{{ projectName }}</text>
+				<text class="hint">已归档清单</text>
+			</view>
+		</view>
+		<!-- #ifndef APP -->
+		<view class="list">
+		<!-- #endif -->
+		<!-- #ifdef APP -->
+		<list-view class="list" direction="vertical" :refresher-enabled="true" :refresher-triggered="refreshing" @refresherrefresh="pullToRefresh">
+			<list-item>
+		<!-- #endif -->
+				<view v-if="!groups.length" class="empty-state">
+					<text class="empty-title">{{ loading ? '加载中...' : '暂无已归档的分组' }}</text>
+					<text v-if="!loading" class="hint">完成分组下所有任务后，可将分组归档</text>
+				</view>
+		<!-- #ifdef APP -->
+			</list-item>
+			<list-item v-for="group in groups" :key="group._id" :type="1">
+		<!-- #endif -->
+		<!-- #ifndef APP -->
+			<view v-for="group in groups" :key="group._id">
+		<!-- #endif -->
+				<view class="group-row" @tap="viewGroupTasks(group)">
+					<view class="group-content">
+						<text class="group-name">{{ group.name }}</text>
+						<view class="meta">
+							<text class="count">{{ group.taskCount }} 个任务</text>
+							<text class="hint">归档于 {{ formatDateCN(group.archived_date) }}</text>
+						</view>
+					</view>
+					<text class="action" @tap.stop="changeGroup(group, false)">恢复</text>
+					<text class="action danger" @tap.stop="changeGroup(group, true)">删除</text>
+				</view>
+		<!-- #ifndef APP -->
+			</view>
+		<!-- #endif -->
+		<!-- #ifdef APP -->
+			</list-item>
+		</list-view>
+		<!-- #endif -->
+		<!-- #ifndef APP -->
+		</view>
+		<!-- #endif -->
+
+		<page-container :show="popupOpen" position="center" custom-style="background-color: transparent;" @clickoverlay="closePopup" @afterleave="afterPopupLeave">
+			<view class="popup-mask" @tap="closePopup">
+				<view class="popup" @tap.stop>
+					<view class="popup-header">
+						<text class="popup-title">{{ currentGroup?.name }}</text>
+						<text class="close" @tap="closePopup">关闭</text>
+					</view>
+					<scroll-view direction="vertical" :scroll-y="true" class="popup-scroll" :style="{ height: popupListHeight + 'px' }">
+						<text v-if="groupTasksLoading" class="popup-message">加载中...</text>
+						<text v-else-if="!groupTasks.length" class="popup-message">该分组下没有任务</text>
+						<view v-for="task in groupTasks" :key="task._id" class="popup-item" @tap="viewTaskDetail(task._id)">
+							<text class="task-check">✓</text>
+							<view class="group-content">
+								<text class="task-title">{{ task.title }}</text>
+								<text class="hint">完成于 {{ formatDateTimeCN(task.completion_date) }}</text>
+							</view>
+						</view>
+					</scroll-view>
+				</view>
+			</view>
+		</page-container>
+	</view>
+</template>
+
+<script setup>
+import CustomNavBar from '@/components/CustomNavBar/CustomNavBar.uvue'
+import { formatDateCN, formatDateTimeCN } from '@/utils/date.js'
+import { BREAKPOINTS } from '@/utils/responsive.js'
+
+const db = uniCloud.databaseForJQL()
+const projectName = ref('')
+const isWideScreen = ref(false)
+const windowHeight = ref(0)
+const groups = ref([])
+const loading = ref(false)
+const refreshing = ref(false)
+const currentGroup = ref(null)
+const popupOpen = ref(false)
+const groupTasks = ref([])
+const groupTasksLoading = ref(false)
+const popupListHeight = computed(() => Math.min(windowHeight.value * 0.7 - 50, Math.max(80, groupTasks.value.length * 68)))
+let projectId = ''
+let requestId = 0
+let popupRequest = 0
+let nextTaskId = ''
+let changingGroup = false
+
+function updateLayout() {
+	const info = uni.getWindowInfo()
+	isWideScreen.value = info.windowWidth >= BREAKPOINTS.TABLET
+	windowHeight.value = info.windowHeight
+}
+
+function goBack() {
+	if (getCurrentPages().length > 1) uni.navigateBack({ delta: 1 })
+	else uni.reLaunch({ url: '/pages/opendb-projects/list' })
+}
+
+async function loadArchivedGroups() {
+	if (!projectId) return
+	const request = ++requestId
+	loading.value = true
+	try {
+		const { data } = await db.collection('task-group').where({ project_id: projectId, archived: true }).orderBy('archived_date desc').get()
+		if (request !== requestId) return
+		const counts = {}
+		if (data.length) {
+			const result = await db.collection('opendb-task').where({ group_id: db.command.in(data.map(g => g._id)) })
+				.groupBy('group_id').groupField('count(*) as taskCount').get()
+			for (const row of result.data) counts[row.group_id] = row.taskCount
+		}
+		if (request === requestId) groups.value = data.map(group => ({ ...group, taskCount: counts[group._id] || 0 }))
+	} catch (error) {
+		if (request === requestId) uni.showToast({ title: error.errMsg || error.message || '加载失败', icon: 'none' })
+	} finally {
+		if (request === requestId) loading.value = false
+	}
+}
+
+async function viewGroupTasks(group) {
+	if (currentGroup.value || changingGroup) return
+	const request = ++popupRequest
+	currentGroup.value = group
+	groupTasks.value = []
+	groupTasksLoading.value = true
+	popupOpen.value = true
+	try {
+		const { data } = await db.collection('opendb-task').where({ group_id: group._id })
+			.field('_id,title,completion_date,status').orderBy('completion_date desc').get()
+		if (request === popupRequest) groupTasks.value = data
+	} catch (error) {
+		if (request === popupRequest) uni.showToast({ title: error.errMsg || error.message || '加载失败', icon: 'none' })
+	} finally {
+		if (request === popupRequest) groupTasksLoading.value = false
+	}
+}
+
+function closePopup() {
+	popupOpen.value = false
+}
+
+function viewTaskDetail(id) {
+	if (!popupOpen.value) return
+	nextTaskId = id
+	closePopup()
+}
+
+function afterPopupLeave() {
+	popupRequest++
+	popupOpen.value = false
+	currentGroup.value = null
+	groupTasks.value = []
+	if (nextTaskId) {
+		const id = nextTaskId
+		nextTaskId = ''
+		uni.navigateTo({ url: `/pages/opendb-task/detail?id=${encodeURIComponent(id)}&pid=${encodeURIComponent(projectId)}` })
+	}
+}
+
+async function changeGroup(group, remove) {
+	if (changingGroup || currentGroup.value) return
+	changingGroup = true
+	try {
+		const { confirm } = await uni.showModal(remove ? {
+			title: '删除分组', confirmText: '删除', confirmColor: '#e74c3c',
+			content: group.taskCount ? `分组「${group.name}」下有 ${group.taskCount} 个任务，删除分组后这些任务将变为未分组状态。确定删除吗？` : `确定要删除分组「${group.name}」吗？`
+		} : { title: '恢复分组', content: `确定要将「${group.name}」恢复到任务列表吗？` })
+		if (!confirm) return
+		const doc = db.collection('task-group').doc(group._id)
+		if (remove) {
+			// 列表中的计数是快照，删除前也处理确认期间刚移入分组的任务。
+			await db.collection('opendb-task').where({ group_id: group._id }).update({ group_id: '' })
+			await doc.remove()
+		} else {
+			await doc.update({ archived: false, archived_date: null })
+		}
+		uni.showToast({ title: remove ? '已删除' : '已恢复', icon: 'success' })
+		await loadArchivedGroups()
+	} catch (error) {
+		uni.showToast({ title: error.errMsg || error.message || '操作失败', icon: 'none' })
+	} finally {
+		changingGroup = false
+	}
+}
+
+async function pullToRefresh() {
+	if (refreshing.value) return
+	refreshing.value = true
+	try {
+		await loadArchivedGroups()
+	} finally {
+		refreshing.value = false
+		// #ifndef APP
+		uni.stopPullDownRefresh()
+		// #endif
+	}
+}
+
+onLoad(options => {
+	projectId = options.id || ''
+	projectName.value = options.name || ''
+	try { projectName.value = decodeURIComponent(projectName.value) } catch { /* 路由已解码的名称可含字面百分号。 */ }
+	updateLayout()
+})
+onResize(updateLayout)
+onPageShow(loadArchivedGroups)
+// #ifndef APP
+onPullDownRefresh(pullToRefresh)
+// #endif
+onUnload(() => {
+	requestId++
+	popupRequest++
+	nextTaskId = ''
+})
+</script>
+
+<style scoped>
+.container { flex: 1; display: flex; flex-direction: column; background-color: #f7f8fa; }
+.pc-header { display: flex; flex-direction: row; align-items: center; padding: 16px 24px; }
+.back { width: 36px; height: 36px; line-height: 36px; border-radius: 8px; background-color: #e6fcf5; color: #28724e; font-size: 26px; text-align: center; }
+.heading, .group-content { display: flex; flex-direction: column; flex: 1; }
+.heading { margin-left: 12px; }
+.project-name { color: #2c3e50; font-size: 18px; font-weight: 600; }
+.hint { color: #6c757d; font-size: 12px; margin-top: 3px; }
+.list { flex: 1; margin: 16px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; padding: 60px 16px; border-radius: 12px; background-color: #ffffff; }
+.empty-title { margin-bottom: 6px; font-size: 15px; color: #53645d; }
+.group-row, .popup-item { display: flex; flex-direction: row; align-items: center; padding: 14px; background-color: #ffffff; border-bottom: 1px solid #edf0ee; }
+.group-name { font-size: 15px; color: #2c3e50; font-weight: 600; }
+.meta { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.count { margin-right: 10px; margin-top: 3px; font-size: 13px; color: #28724e; }
+.action { padding: 8px; margin-left: 6px; color: #28724e; background-color: #edf9f2; font-size: 13px; border-radius: 8px; }
+.danger { color: #ba382f; background-color: #fef2f2; }
+.popup-mask { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.popup { display: flex; flex-direction: column; width: 90%; max-width: 400px; background-color: #ffffff; border-radius: 12px; overflow: hidden; }
+.popup-header { display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 12px 16px; background-color: #359568; }
+.popup-title { flex: 1; color: #ffffff; font-size: 16px; font-weight: 600; }
+.close { padding: 4px 8px; color: #ffffff; font-size: 14px; }
+.popup-scroll { width: 100%; }
+.popup-message { padding: 22px; text-align: center; color: #6c757d; font-size: 14px; }
+.task-check { margin-right: 12px; color: #359568; font-size: 16px; }
+.task-title { color: #2c3e50; font-size: 14px; }
+/* #ifdef WEB */
+.container { min-height: 100vh; }
+@media (min-width: 768px) {
+	.pc-header, .list { width: 100%; max-width: 900px; box-sizing: border-box; align-self: center; }
+	.list { margin: 0; padding: 20px 24px; }
+	.group-name { font-size: 16px; }
+}
+/* #endif */
+</style>
