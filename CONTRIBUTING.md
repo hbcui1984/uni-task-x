@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你对 uni-task 项目的关注！我们欢迎任何形式的贡献。
+感谢你对 uni-task-x 项目的关注！本项目的维护仓库是 `hbcui1984/uni-task-x`，维护分支是 `main`。
 
 ## 如何贡献
 
@@ -83,8 +83,8 @@ docs: 更新 README 安装说明
 
 1. 克隆项目
    ```bash
-   git clone https://github.com/hbcui1984/uni-task.git
-   cd uni-task
+   git clone https://github.com/hbcui1984/uni-task-x.git
+   cd uni-task-x
    ```
 
 2. 安装依赖

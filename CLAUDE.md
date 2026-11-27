@@ -211,6 +211,8 @@ module.exports = {
 
 ### Git 提交规范
 
+本工作区属于 `hbcui1984/uni-task-x`，维护主分支为 `main`。收到推送指令时，先用 `git remote get-url --push origin` 和 `git branch --show-current` 核对目标，再推送至 `origin/main`。`hbcui1984/uni-task` 是复制来源。
+
 **重要**：
 1. **不要主动提交到 GitHub**
 2. 每次提交前必须**列出待提交的文件清单**
